@@ -1,2 +1,2 @@
-# kickstart-fitlife
+# fitlife
 Fitness app
