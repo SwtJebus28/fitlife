@@ -17,33 +17,49 @@
     #root{height:100%}
     button,a{touch-action:manipulation}
     .nav{padding-bottom:max(4px,env(safe-area-inset-bottom)) !important}
-    /* Loading screen */
     #boot{position:fixed;inset:0;background:#090909;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9999;transition:opacity .4s}
     #boot .icon{font-size:52px}
     #boot .name{font-size:38px;font-weight:900;letter-spacing:4px;color:#c8f135;font-family:impact,sans-serif}
     #boot .sub{font-size:13px;color:#55555f;letter-spacing:.5px}
     #boot .ring{width:32px;height:32px;border-radius:50%;border:2.5px solid #1e1e23;border-top-color:#c8f135;animation:spin .75s linear infinite}
+    #err{display:none;position:fixed;inset:0;background:#090909;padding:30px;z-index:9999;overflow:auto}
+    #err h2{color:#f55a3f;font-size:20px;margin-bottom:12px}
+    #err pre{color:#9090a0;font-size:11px;white-space:pre-wrap;word-break:break-all;line-height:1.6}
     @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
-
-  <!-- Boot screen shown instantly, before JS runs -->
   <div id="boot">
-    <div class="icon">💪</div>
+    <div class="icon">&#x1F4AA;</div>
     <div class="name">FITLIFE</div>
-    <div class="sub">Loading your program...</div>
+    <div class="sub">Starting up...</div>
     <div class="ring"></div>
   </div>
-
+  <div id="err"><h2>&#x26A0;&#xFE0F; Error</h2><pre id="errmsg"></pre></div>
   <div id="root"></div>
 
-  <!-- React 18 (production, minified) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 
-  <!-- Pre-compiled app — NO Babel, NO transpilation, runs instantly -->
   <script>
+    // Surface any JS errors visibly on screen (helpful for mobile debugging)
+    window.onerror = function(msg, src, line, col, err) {
+      document.getElementById('boot').style.display = 'none';
+      var e = document.getElementById('err');
+      e.style.display = 'block';
+      document.getElementById('errmsg').textContent = (err ? err.stack : '') || msg;
+    };
+    window.onunhandledrejection = function(e) {
+      document.getElementById('boot').style.display = 'none';
+      var er = document.getElementById('err');
+      er.style.display = 'block';
+      document.getElementById('errmsg').textContent = String(e.reason);
+    };
+  </script>
+
+  <script>
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
 var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
@@ -758,25 +774,29 @@ function App() {
   return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("style", null, STYLE), /* @__PURE__ */ React.createElement("div", { className: "app" }, /* @__PURE__ */ React.createElement("div", { className: "main" }, tab === "home" && /* @__PURE__ */ React.createElement(Dashboard, { history, nutrition, setTab }), tab === "strength" && /* @__PURE__ */ React.createElement(StrengthTab, { history, setHistory, weights, setWeights }), tab === "cardio" && /* @__PURE__ */ React.createElement(CardioTab, { history, setHistory }), tab === "mobility" && /* @__PURE__ */ React.createElement(MobilityTab, null), tab === "nutrition" && /* @__PURE__ */ React.createElement(NutritionTab, { nutrition, setNutrition }), tab === "coach" && /* @__PURE__ */ React.createElement(CoachTab, { history, weights })), /* @__PURE__ */ React.createElement("nav", { className: "nav" }, TABS.map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, className: `nb ${tab === t.id ? "on" : ""}`, onClick: () => setTab(t.id) }, t.ic, /* @__PURE__ */ React.createElement("span", null, t.lbl))))));
 }
 
+  </script>
 
-// Mount React app
-(function() {
-  const { useState, useEffect, useRef } = React;
-  const container = document.getElementById('root');
-  const root = ReactDOM.createRoot(container);
-  root.render(React.createElement(App));
-
-  // Hide boot screen after first render
-  requestAnimationFrame(function() {
-    requestAnimationFrame(function() {
-      const boot = document.getElementById('boot');
-      if (boot) {
-        boot.style.opacity = '0';
-        setTimeout(function() { boot.remove(); }, 400);
-      }
-    });
-  });
-})();
+  <script>
+    // Mount the app
+    try {
+      const container = document.getElementById('root');
+      const root = ReactDOM.createRoot(container);
+      root.render(React.createElement(App));
+      // Hide boot screen after render
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          var boot = document.getElementById('boot');
+          if (boot) {
+            boot.style.opacity = '0';
+            setTimeout(function() { if(boot.parentNode) boot.remove(); }, 400);
+          }
+        });
+      });
+    } catch(e) {
+      document.getElementById('boot').style.display = 'none';
+      document.getElementById('err').style.display = 'block';
+      document.getElementById('errmsg').textContent = e.stack || e.message;
+    }
   </script>
 </body>
 </html>
