@@ -777,6 +777,435 @@ function App() {
   </script>
 
   <script>
+  // ============================================================
+  // Sprint 1 — Camera Barcode Scanner for Nutrition
+  // Uses native BarcodeDetector API (iOS 17+ / Chrome 83+)
+  // Open Food Facts API (free, no key) for nutrition lookup
+  // ============================================================
+
+  function BarcodeScanner({ onAdd, onClose, onRescan }) {
+    const [phase, setPhase] = React.useState('init');
+    // phases: init | scanning | loading | found | notfound | error | unsupported
+    const [food, setFood] = React.useState(null);
+    const [grams, setGrams] = React.useState('100');
+    const [errMsg, setErrMsg] = React.useState('');
+    const videoRef = React.useRef(null);
+    const streamRef = React.useRef(null);
+    const activeRef = React.useRef(true);
+
+    const stopCamera = () => {
+      activeRef.current = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
+
+    const lookup = async (barcode) => {
+      setPhase('loading');
+      try {
+        const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+        if (!res.ok) throw new Error('Network error');
+        const data = await res.json();
+        if (data.status === 1 && data.product) {
+          const p = data.product;
+          const n = p.nutriments || {};
+          const servingQty = parseFloat(p.serving_quantity) || 100;
+          setFood({
+            name: (p.product_name || p.generic_name || 'Scanned Product').trim(),
+            cals100: Math.round(n['energy-kcal_100g'] || n['energy-kcal'] || 0),
+            protein100: +((n.proteins_100g || 0).toFixed(1)),
+            carbs100: +((n.carbohydrates_100g || 0).toFixed(1)),
+            fat100: +((n.fat_100g || 0).toFixed(1)),
+            servingSize: p.serving_size || `${Math.round(servingQty)}g`,
+            servingQty,
+            barcode,
+          });
+          setGrams(String(Math.round(servingQty)));
+          setPhase('found');
+        } else {
+          setErrMsg('Barcode not found in Open Food Facts database. Enter manually.');
+          setPhase('notfound');
+        }
+      } catch(e) {
+        setErrMsg('Could not reach food database. Check your internet connection.');
+        setPhase('error');
+      }
+    };
+
+    React.useEffect(() => {
+      if (!('BarcodeDetector' in window)) {
+        setPhase('unsupported');
+        return;
+      }
+      let detector;
+      try {
+        detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'] });
+      } catch(e) {
+        try { detector = new BarcodeDetector(); }
+        catch(e2) { setPhase('unsupported'); return; }
+      }
+      let scanTimer = null;
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      }).then(stream => {
+        if (!activeRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) { stream.getTracks().forEach(t => t.stop()); return; }
+        video.srcObject = stream;
+        video.setAttribute('playsinline', '');
+        return video.play();
+      }).then(() => {
+        if (!activeRef.current) return;
+        setPhase('scanning');
+        const video = videoRef.current;
+        const scan = async () => {
+          if (!activeRef.current || !video) return;
+          try {
+            const codes = await detector.detect(video);
+            if (codes.length > 0 && activeRef.current) {
+              stopCamera();
+              lookup(codes[0].rawValue);
+              return;
+            }
+          } catch(e) { /* frame not ready yet */ }
+          if (activeRef.current) scanTimer = setTimeout(scan, 250);
+        };
+        scanTimer = setTimeout(scan, 600);
+      }).catch(err => {
+        if (!activeRef.current) return;
+        setPhase('error');
+        setErrMsg(err.name === 'NotAllowedError'
+          ? 'Camera access denied.\n\nGo to Settings → Safari → Camera and allow access, then try again.'
+          : 'Camera is not available on this device.'
+        );
+      });
+      return () => {
+        if (scanTimer) clearTimeout(scanTimer);
+        stopCamera();
+      };
+    }, []);
+
+    const handleAdd = () => {
+      const g = parseFloat(grams) || 100;
+      const scale = g / 100;
+      const r1 = v => Math.round(v * 10) / 10;
+      onAdd({
+        name: `${food.name} (${g}g)`,
+        cals: Math.round(food.cals100 * scale),
+        protein: r1(food.protein100 * scale),
+        carbs: r1(food.carbs100 * scale),
+        fat: r1(food.fat100 * scale),
+      });
+      onClose();
+    };
+
+    const g = parseFloat(grams) || 100;
+    const scale = g / 100;
+    const r1 = v => Math.round(v * 10) / 10;
+
+    // Shared full-screen overlay wrapper with close button
+    const wrap = (body) => React.createElement('div', {
+      style: { position: 'fixed', inset: 0, background: '#000', zIndex: 400, display: 'flex', flexDirection: 'column' }
+    },
+      React.createElement('div', {
+        style: {
+          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2,
+          padding: 'max(20px, env(safe-area-inset-top)) 16px 16px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          background: 'linear-gradient(to bottom, rgba(0,0,0,.8) 0%, transparent 100%)'
+        }
+      },
+        React.createElement('div', { style: { color: '#fff', fontWeight: 700, fontSize: 16 } }, 'Scan Food Barcode'),
+        React.createElement('button', {
+          onClick: onClose,
+          style: { background: 'rgba(255,255,255,.18)', border: 'none', borderRadius: '50%', width: 34, height: 34, color: '#fff', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+        }, '✕')
+      ),
+      body
+    );
+
+    // ── Scanning view ───────────────────────────────────────
+    if (phase === 'init' || phase === 'scanning') {
+      return wrap(React.createElement(React.Fragment, null,
+        React.createElement('video', {
+          ref: videoRef,
+          style: { width: '100%', height: '100%', objectFit: 'cover' },
+          playsInline: true, muted: true, autoPlay: true
+        }),
+        React.createElement('div', {
+          style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 1 }
+        },
+          React.createElement('div', {
+            style: { width: 260, height: 150, borderRadius: 10, border: '2px solid #c8f135', boxShadow: '0 0 0 9999px rgba(0,0,0,.5)', position: 'relative' }
+          },
+            ...['tl','tr','bl','br'].map(pos => React.createElement('div', { key: pos, style: {
+              position: 'absolute', width: 18, height: 18, borderStyle: 'solid', borderColor: '#c8f135',
+              borderTopWidth: pos[0]==='t' ? 3 : 0, borderBottomWidth: pos[0]==='b' ? 3 : 0,
+              borderLeftWidth: pos[1]==='l' ? 3 : 0, borderRightWidth: pos[1]==='r' ? 3 : 0,
+              top: pos[0]==='t' ? -1 : 'auto', bottom: pos[0]==='b' ? -1 : 'auto',
+              left: pos[1]==='l' ? -1 : 'auto', right: pos[1]==='r' ? -1 : 'auto',
+              borderRadius: pos==='tl'?'4px 0 0 0':pos==='tr'?'0 4px 0 0':pos==='bl'?'0 0 0 4px':'0 0 4px 0'
+            }}))
+          ),
+          React.createElement('div', {
+            style: { color: '#c8f135', fontSize: 13, fontWeight: 600, marginTop: 18, letterSpacing: 1, textShadow: '0 1px 6px rgba(0,0,0,.9)' }
+          }, phase === 'scanning' ? 'Point at barcode' : 'Starting camera...')
+        )
+      ));
+    }
+
+    // ── Loading view ────────────────────────────────────────
+    if (phase === 'loading') {
+      return wrap(React.createElement('div', {
+        style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#090909', gap: 16 }
+      },
+        React.createElement('span', { className: 'spin', style: { width: 36, height: 36 } }),
+        React.createElement('div', { style: { color: '#9090a0', fontSize: 14 } }, 'Looking up barcode...')
+      ));
+    }
+
+    // ── Found view ──────────────────────────────────────────
+    if (phase === 'found' && food) {
+      return wrap(React.createElement('div', {
+        style: { flex: 1, overflow: 'auto', background: '#090909', padding: '72px 16px 24px', WebkitOverflowScrolling: 'touch' }
+      },
+        React.createElement('div', { className: 'co lime', style: { margin: '0 0 12px' } },
+          React.createElement('strong', { style: { color: '#c8f135', fontSize: 15 } }, food.name),
+          React.createElement('br'),
+          React.createElement('span', { style: { fontSize: 11, color: '#9090a0' } }, `Serving: ${food.servingSize}`)
+        ),
+        React.createElement('div', { className: 'card', style: { margin: '0 0 12px' } },
+          React.createElement('div', { className: 'clbl' }, 'Per 100g'),
+          ...[
+            { lbl: 'Calories', val: food.cals100, unit: ' kcal', max: 500, color: '#c8f135' },
+            { lbl: 'Protein',  val: food.protein100, unit: 'g', max: 50, color: '#3fb8f5' },
+            { lbl: 'Carbs',    val: food.carbs100, unit: 'g', max: 100, color: '#b06af5' },
+            { lbl: 'Fat',      val: food.fat100, unit: 'g', max: 50, color: '#f5a83f' },
+          ].map(m => React.createElement('div', { key: m.lbl, className: 'mr' },
+            React.createElement('span', { className: 'mn' }, m.lbl),
+            React.createElement('div', { className: 'mb' },
+              React.createElement('div', { className: 'mf', style: { width: `${Math.min(m.val / m.max * 100, 100)}%`, background: m.color } })
+            ),
+            React.createElement('span', { className: 'mv' }, `${m.val}${m.unit}`)
+          ))
+        ),
+        React.createElement('div', { className: 'card', style: { margin: '0 0 16px' } },
+          React.createElement('div', { className: 'clbl' }, 'Your Portion'),
+          React.createElement('div', { className: 'ig' },
+            React.createElement('label', { className: 'ilbl' }, 'Amount (grams)'),
+            React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', value: grams, min: 1, step: 5, onChange: e => setGrams(e.target.value) })
+          ),
+          React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, textAlign: 'center', paddingTop: 4 } },
+            ...[
+              { v: Math.round(food.cals100 * scale), l: 'cal', c: '#c8f135' },
+              { v: `${r1(food.protein100 * scale)}g`, l: 'protein', c: '#3fb8f5' },
+              { v: `${r1(food.carbs100 * scale)}g`, l: 'carbs', c: '#b06af5' },
+              { v: `${r1(food.fat100 * scale)}g`, l: 'fat', c: '#f5a83f' },
+            ].map((s, i) => React.createElement('div', { key: i },
+              React.createElement('div', { style: { fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, color: s.c, lineHeight: 1 } }, s.v),
+              React.createElement('div', { style: { fontSize: 9, color: '#55555f', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 2 } }, s.l)
+            ))
+          )
+        ),
+        React.createElement('div', { style: { display: 'flex', gap: 10 } },
+          React.createElement('button', { className: 'btn ghost', onClick: onRescan }, 'Rescan'),
+          React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center' }, onClick: handleAdd }, '+ Add to Log')
+        )
+      ));
+    }
+
+    // ── Not found / error / unsupported view ────────────────
+    const iconMap = { notfound: '🔍', error: '⚠️', unsupported: '📷' };
+    const unsupportedMsg = 'Barcode scanning requires iOS 17+ or Chrome on Android.\n\nUpdate your browser or use Quick Add / Custom Entry.';
+    return wrap(React.createElement('div', {
+      style: { flex: 1, background: '#090909', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 28, gap: 16, textAlign: 'center' }
+    },
+      React.createElement('div', { style: { fontSize: 44 } }, iconMap[phase] || '⚠️'),
+      React.createElement('div', { style: { color: '#9090a0', fontSize: 14, lineHeight: 1.75, maxWidth: 300, whiteSpace: 'pre-line' } },
+        phase === 'unsupported' ? unsupportedMsg : errMsg
+      ),
+      phase !== 'unsupported' && React.createElement('button', { className: 'btn ghost', onClick: onRescan }, 'Try Again'),
+      React.createElement('button', { className: 'btn', onClick: onClose }, 'Enter Manually')
+    ));
+  }
+
+  // ============================================================
+  // NutritionTab override — adds Scan Barcode to Log Food view
+  // ============================================================
+  function NutritionTab({ nutrition, setNutrition }) {
+    const today = new Date().toDateString();
+    const tl = nutrition.find(n => n.date === today) || { date: today, cals: 0, protein: 0, fat: 0, carbs: 0, items: [] };
+    const [view, setView] = React.useState('today');
+    const [c, setC] = React.useState({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+    const [showScanner, setShowScanner] = React.useState(false);
+    const [scanKey, setScanKey] = React.useState(0);
+
+    const add = async (food) => {
+      const u = {
+        ...tl,
+        cals:    Math.round(tl.cals    + (+(food.cals    || 0))),
+        protein: Math.round((tl.protein + (+(food.protein || 0))) * 10) / 10,
+        fat:     Math.round((tl.fat     + (+(food.fat     || 0))) * 10) / 10,
+        carbs:   Math.round((tl.carbs   + (+(food.carbs   || 0))) * 10) / 10,
+        items: [...(tl.items || []), food.name],
+      };
+      const nn = [u, ...nutrition.filter(n => n.date !== today)];
+      setNutrition(nn);
+      await sset('nutrition', nn);
+    };
+
+    const addC = () => {
+      if (!c.name || !c.cals) return;
+      add({ name: c.name, cals: +c.cals, protein: +c.protein || 0, fat: +c.fat || 0, carbs: +c.carbs || 0 });
+      setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+    };
+
+    const left = USER.targetCals - tl.cals;
+
+    return React.createElement('div', null,
+      // ── Barcode scanner overlay (remounts on rescan via key) ──
+      showScanner && React.createElement(BarcodeScanner, {
+        key: scanKey,
+        onAdd: food => add(food),
+        onClose: () => setShowScanner(false),
+        onRescan: () => setScanKey(k => k + 1),
+      }),
+
+      // ── Page header ──────────────────────────────────────────
+      React.createElement('div', { className: 'ph' },
+        React.createElement('div', { className: 'ph-title' }, 'FUEL'),
+        React.createElement('div', { className: 'ph-sub' }, `Flexible tracking · ${USER.targetCals} cal target`)
+      ),
+
+      // ── Sub-tabs ─────────────────────────────────────────────
+      React.createElement('div', { className: 'tabs' },
+        ...['today','log','targets'].map((v, i) =>
+          React.createElement('div', { key: v, className: `tab ${view === v ? 'on' : ''}`, onClick: () => setView(v) },
+            ['Today','Log Food','Targets'][i]
+          )
+        )
+      ),
+
+      // ── Today view ───────────────────────────────────────────
+      view === 'today' && React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+          React.createElement('div', { className: 'clbl' }, "Today's Totals"),
+          React.createElement('div', { style: { display: 'flex', justifyContent: 'space-around', textAlign: 'center', marginBottom: 16 } },
+            ...[
+              { v: tl.cals, l: 'Eaten', c: left < 0 ? 'var(--red)' : 'var(--lime)' },
+              { v: Math.max(left, 0), l: 'Left', c: 'var(--t2)' },
+              { v: `${tl.protein}g`, l: 'Protein', c: 'var(--blue)' }
+            ].map((s, i) => React.createElement('div', { key: i },
+              React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 36, color: s.c, lineHeight: 1 } }, s.v),
+              React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', marginTop: 3, textTransform: 'uppercase' } }, s.l)
+            ))
+          ),
+          ...[
+            { name: 'Protein', val: tl.protein, max: USER.protein, bg: 'var(--blue)' },
+            { name: 'Carbs',   val: tl.carbs,   max: USER.carbs,   bg: 'var(--purple)' },
+            { name: 'Fat',     val: tl.fat,      max: USER.fat,     bg: 'var(--amber)' },
+          ].map(m => React.createElement('div', { key: m.name, className: 'mr' },
+            React.createElement('span', { className: 'mn' }, m.name),
+            React.createElement('div', { className: 'mb' },
+              React.createElement('div', { className: 'mf', style: { width: `${Math.min(m.val / m.max * 100, 100)}%`, background: m.bg } })
+            ),
+            React.createElement('span', { className: 'mv' }, `${m.val}/${m.max}g`)
+          ))
+        ),
+        (tl.items || []).length > 0 && React.createElement('div', { className: 'card' },
+          React.createElement('div', { className: 'clbl' }, 'Logged Today'),
+          ...(tl.items || []).map((item, i) =>
+            React.createElement('div', { key: i, style: { fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--border)', color: 'var(--t2)' } }, item)
+          )
+        ),
+        React.createElement('div', { className: 'co lime', style: { marginTop: 10 } },
+          React.createElement('strong', { style: { color: 'var(--lime)' } }, '💡 Protein First'),
+          React.createElement('br'),
+          `At 56, ${USER.protein}g protein daily preserves muscle during fat loss. Aim 40–50g per meal, 3–4 meals.`
+        )
+      ),
+
+      // ── Log Food view ────────────────────────────────────────
+      view === 'log' && React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+          React.createElement('div', { className: 'clbl' }, 'Barcode Scanner'),
+          React.createElement('button', {
+            className: 'btn full',
+            style: { fontSize: 15, justifyContent: 'center', gap: 10 },
+            onClick: () => setShowScanner(true)
+          },
+            React.createElement('span', null, '📷'),
+            ' Scan Food Barcode'
+          ),
+          React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 } },
+            'Point at any packaged food barcode — nutrition auto-fills from Open Food Facts'
+          )
+        ),
+        React.createElement('div', { className: 'card' },
+          React.createElement('div', { className: 'clbl' }, 'Quick Add'),
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap' } },
+            ...FOODS.map((f, i) => React.createElement('span', { key: i, className: 'pill', onClick: () => add(f) }, '+ ', f.name))
+          )
+        ),
+        React.createElement('div', { className: 'card' },
+          React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
+          React.createElement('div', { className: 'ig' },
+            React.createElement('label', { className: 'ilbl' }, 'Food Name'),
+            React.createElement('input', { className: 'inp', placeholder: 'e.g. Ribeye 8oz', value: c.name, onChange: e => setC(p => ({ ...p, name: e.target.value })) })
+          ),
+          React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
+            ...[
+              { k: 'cals',    lbl: 'Calories',    ph: '400' },
+              { k: 'protein', lbl: 'Protein (g)',  ph: '35'  },
+              { k: 'carbs',   lbl: 'Carbs (g)',    ph: '20'  },
+              { k: 'fat',     lbl: 'Fat (g)',      ph: '18'  },
+            ].map(f => React.createElement('div', { key: f.k, className: 'ig' },
+              React.createElement('label', { className: 'ilbl' }, f.lbl),
+              React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: f.ph, value: c[f.k], onChange: e => setC(p => ({ ...p, [f.k]: e.target.value })) })
+            ))
+          ),
+          React.createElement('button', { className: 'btn full', onClick: addC }, 'Add Food')
+        )
+      ),
+
+      // ── Targets view ─────────────────────────────────────────
+      view === 'targets' && React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'co lime', style: { marginTop: 10 } },
+          React.createElement('strong', { style: { color: 'var(--lime)' } }, 'Calculated for You'),
+          React.createElement('br'),
+          `56yo male · 5'10" · 198 lb · lightly active · fat loss`
+        ),
+        React.createElement('div', { className: 'sg' },
+          ...[
+            { v: USER.tdee,       u: 'cal',   l: 'TDEE' },
+            { v: USER.targetCals, u: 'cal',   l: 'Daily Target', c: 'var(--lime)' },
+            { v: USER.protein,    u: 'g',     l: 'Protein',      c: 'var(--blue)' },
+            { v: USER.carbs,      u: 'g',     l: 'Carbs',        c: 'var(--purple)' },
+            { v: USER.fat,        u: 'g',     l: 'Fat',          c: 'var(--amber)' },
+            { v: '~0.5',          u: 'lb/wk', l: 'Expected Loss' },
+          ].map((s, i) => React.createElement('div', { key: i, className: 'sc', style: { cursor: 'default' } },
+            React.createElement('div', { className: 'sv', style: { color: s.c || 'var(--text)' } },
+              s.v, React.createElement('span', { className: 'su' }, s.u)
+            ),
+            React.createElement('div', { className: 'sl' }, s.l)
+          ))
+        ),
+        React.createElement('div', { className: 'co blue', style: { marginTop: 4 } },
+          React.createElement('strong', { style: { color: 'var(--blue)' } }, 'Flexible Tracking'),
+          React.createElement('br'),
+          '±10% of targets most days. Consistency over weeks beats single-day perfection.'
+        )
+      ),
+
+      React.createElement('div', { className: 'gap' })
+    );
+  }
+  </script>
+
+  <script>
     // Mount the app
     try {
       const container = document.getElementById('root');
