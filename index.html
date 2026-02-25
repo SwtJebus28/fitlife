@@ -1247,7 +1247,11 @@ function App() {
           }
         }
         if (!jsonStr) throw new Error('No structured data found in label');
-        const parsed = JSON.parse(jsonStr);
+        // Strip trailing commas (LLMs sometimes output them) before parsing
+        const cleanJson = jsonStr.replace(/,\s*([}\]])/g, '$1');
+        let parsed;
+        try { parsed = JSON.parse(cleanJson); }
+        catch(pe) { throw new Error(`Label read OK but JSON malformed: ${pe.message}. Raw: ${cleanJson.slice(0, 120)}`); }
         if (parsed.cals100 == null && !parsed.name) throw new Error('Could not read nutrition values');
         if (parsed.cals100 == null) parsed.cals100 = 0;
         setResult(parsed);
