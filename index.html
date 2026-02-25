@@ -974,6 +974,12 @@ function App() {
         carbs: r1(food.carbs100 * scale),
         fat: r1(food.fat100 * scale),
       });
+      // Save raw per-100g data to My Foods for future quick-add
+      if (onSave) onSave({
+        name: food.name, cals100: food.cals100, protein100: food.protein100,
+        carbs100: food.carbs100, fat100: food.fat100,
+        defaultGrams: g, barcode: food.barcode || null,
+      });
       onClose();
     };
 
@@ -1113,8 +1119,12 @@ function App() {
   }
 
   // ============================================================
-  // NutritionTab override — adds Scan Barcode to Log Food view
+  // NutritionTab override — adds Scan Barcode, My Foods, smart search
   // ============================================================
+  const MY_FOODS_KEY = 'fitlife_my_foods';
+  const _getMyFoods = () => { try { return JSON.parse(localStorage.getItem(MY_FOODS_KEY) || '[]'); } catch(e) { return []; } };
+  const _saveMyFoodsLS = (arr) => { try { localStorage.setItem(MY_FOODS_KEY, JSON.stringify(arr)); } catch(e) {} };
+
   function NutritionTab({ nutrition, setNutrition }) {
     const today = new Date().toDateString();
     const tl = nutrition.find(n => n.date === today) || { date: today, cals: 0, protein: 0, fat: 0, carbs: 0, items: [] };
@@ -1122,6 +1132,31 @@ function App() {
     const [c, setC] = React.useState({ name: '', cals: '', protein: '', fat: '', carbs: '' });
     const [showScanner, setShowScanner] = React.useState(false);
     const [scanKey, setScanKey] = React.useState(0);
+
+    // My Foods
+    const [myFoods, setMyFoods] = React.useState(_getMyFoods);
+
+    const saveToMyFoods = (raw) => {
+      setMyFoods(prev => {
+        const existing = raw.barcode ? prev.findIndex(f => f.barcode && f.barcode === raw.barcode) : -1;
+        let next;
+        if (existing >= 0) {
+          next = prev.map((f, i) => i === existing ? { ...f, defaultGrams: raw.defaultGrams } : f);
+        } else {
+          next = [{ id: Date.now(), ...raw }, ...prev];
+        }
+        _saveMyFoodsLS(next);
+        return next;
+      });
+    };
+
+    const removeFromMyFoods = (id) => {
+      setMyFoods(prev => {
+        const next = prev.filter(f => f.id !== id);
+        _saveMyFoodsLS(next);
+        return next;
+      });
+    };
 
     const add = async (food) => {
       const u = {
@@ -1137,10 +1172,97 @@ function App() {
       await sset('nutrition', nn);
     };
 
+    const addMyFood = (f) => {
+      const g = f.defaultGrams || 100;
+      const scale = g / 100;
+      add({
+        name: `${f.name} (${g}g)`,
+        cals: Math.round(f.cals100 * scale),
+        protein: Math.round(f.protein100 * scale * 10) / 10,
+        carbs: Math.round(f.carbs100 * scale * 10) / 10,
+        fat: Math.round(f.fat100 * scale * 10) / 10,
+      });
+    };
+
+    // Smart search
+    const [suggestions, setSuggestions] = React.useState([]);
+    const [searching, setSearching] = React.useState(false);
+    const [selectedFood, setSelectedFood] = React.useState(null);
+    const [customAmt, setCustomAmt] = React.useState('100');
+    const [customUnit, setCustomUnit] = React.useState('g');
+    const searchTimerRef = React.useRef(null);
+
+    const unitFactors = { g: 1, oz: 28.35, lb: 453.59, cup: 237, 'fl oz': 29.57 };
+
+    const searchFoods = async (query) => {
+      if (!query || query.length < 2) { setSuggestions([]); return; }
+      setSearching(true);
+      try {
+        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&action=process&json=1&page_size=6&fields=product_name,nutriments`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const items = (data.products || [])
+          .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'] != null)
+          .map(p => ({
+            name: p.product_name,
+            cals100: Math.round(p.nutriments['energy-kcal_100g'] || 0),
+            protein100: Math.round((p.nutriments['proteins_100g'] || 0) * 10) / 10,
+            carbs100: Math.round((p.nutriments['carbohydrates_100g'] || 0) * 10) / 10,
+            fat100: Math.round((p.nutriments['fat_100g'] || 0) * 10) / 10,
+          }));
+        setSuggestions(items.slice(0, 5));
+      } catch(e) {
+        setSuggestions([]);
+      } finally {
+        setSearching(false);
+      }
+    };
+
+    const handleNameChange = (val) => {
+      setC(p => ({ ...p, name: val }));
+      setSelectedFood(null);
+      clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = setTimeout(() => searchFoods(val), 500);
+    };
+
+    const selectSuggestion = (s) => {
+      setC(p => ({ ...p, name: s.name, cals: '', protein: '', carbs: '', fat: '' }));
+      setSelectedFood(s);
+      setSuggestions([]);
+      setCustomAmt('100');
+      setCustomUnit('g');
+    };
+
+    const getPreview = () => {
+      if (!selectedFood) return null;
+      const grams = parseFloat(customAmt) * (unitFactors[customUnit] || 1);
+      if (!grams || isNaN(grams)) return null;
+      const scale = grams / 100;
+      return {
+        cals: Math.round(selectedFood.cals100 * scale),
+        protein: Math.round(selectedFood.protein100 * scale * 10) / 10,
+        carbs: Math.round(selectedFood.carbs100 * scale * 10) / 10,
+        fat: Math.round(selectedFood.fat100 * scale * 10) / 10,
+        grams: Math.round(grams),
+      };
+    };
+
     const addC = () => {
-      if (!c.name || !c.cals) return;
-      add({ name: c.name, cals: +c.cals, protein: +c.protein || 0, fat: +c.fat || 0, carbs: +c.carbs || 0 });
-      setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+      if (!c.name) return;
+      if (selectedFood) {
+        const preview = getPreview();
+        if (!preview) return;
+        add({ name: `${c.name} (${customAmt}${customUnit})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
+        setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+        setSelectedFood(null);
+        setCustomAmt('100');
+        setCustomUnit('g');
+        setSuggestions([]);
+      } else {
+        if (!c.cals) return;
+        add({ name: c.name, cals: +c.cals, protein: +c.protein || 0, fat: +c.fat || 0, carbs: +c.carbs || 0 });
+        setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+      }
     };
 
     const left = USER.targetCals - tl.cals;
@@ -1152,6 +1274,7 @@ function App() {
         onAdd: food => add(food),
         onClose: () => setShowScanner(false),
         onRescan: () => setScanKey(k => k + 1),
+        onSave: raw => saveToMyFoods(raw),
       }),
 
       // ── Page header ──────────────────────────────────────────
@@ -1210,6 +1333,7 @@ function App() {
 
       // ── Log Food view ────────────────────────────────────────
       view === 'log' && React.createElement(React.Fragment, null,
+        // Barcode Scanner card
         React.createElement('div', { className: 'card', style: { marginTop: 10 } },
           React.createElement('div', { className: 'clbl' }, 'Barcode Scanner'),
           React.createElement('button', {
@@ -1224,30 +1348,98 @@ function App() {
             'Point at any packaged food barcode — nutrition auto-fills from Open Food Facts'
           )
         ),
+        // My Foods card — only shown after first scan save
+        myFoods.length > 0 && React.createElement('div', { className: 'card' },
+          React.createElement('div', { className: 'clbl' }, 'My Foods'),
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+            ...myFoods.map(f => React.createElement('div', {
+              key: f.id,
+              style: { display: 'flex', alignItems: 'center', background: 'var(--surface2)', borderRadius: 20, overflow: 'hidden', border: '1px solid var(--border)' }
+            },
+              React.createElement('span', {
+                style: { padding: '5px 10px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' },
+                onClick: () => addMyFood(f)
+              },
+                '+ ', f.name,
+                React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 4 } },
+                  `${Math.round(f.cals100 * f.defaultGrams / 100)} cal`
+                )
+              ),
+              React.createElement('span', {
+                style: { padding: '5px 8px 5px 2px', fontSize: 14, color: 'var(--t3)', cursor: 'pointer' },
+                onClick: () => removeFromMyFoods(f.id)
+              }, '×')
+            ))
+          )
+        ),
+        // Quick Add card
         React.createElement('div', { className: 'card' },
           React.createElement('div', { className: 'clbl' }, 'Quick Add'),
           React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap' } },
             ...FOODS.map((f, i) => React.createElement('span', { key: i, className: 'pill', onClick: () => add(f) }, '+ ', f.name))
           )
         ),
+        // Custom Entry card with smart search
         React.createElement('div', { className: 'card' },
           React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
-          React.createElement('div', { className: 'ig' },
+          React.createElement('div', { className: 'ig', style: { position: 'relative' } },
             React.createElement('label', { className: 'ilbl' }, 'Food Name'),
-            React.createElement('input', { className: 'inp', placeholder: 'e.g. Ribeye 8oz', value: c.name, onChange: e => setC(p => ({ ...p, name: e.target.value })) })
+            React.createElement('input', { className: 'inp', placeholder: 'e.g. Coffee, Chicken breast', value: c.name, onChange: e => handleNameChange(e.target.value) }),
+            searching && React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 4 } }, 'Searching...'),
+            suggestions.length > 0 && React.createElement('div', {
+              style: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, overflow: 'hidden', marginTop: 2 }
+            },
+              ...suggestions.map((s, i) => React.createElement('div', {
+                key: i,
+                style: { padding: '9px 12px', fontSize: 13, borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', color: 'var(--text)' },
+                onClick: () => selectSuggestion(s)
+              },
+                React.createElement('div', null, s.name),
+                React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 2 } },
+                  `${s.cals100} kcal · P ${s.protein100}g · C ${s.carbs100}g · F ${s.fat100}g per 100g`
+                )
+              ))
+            )
           ),
-          React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
-            ...[
-              { k: 'cals',    lbl: 'Calories',    ph: '400' },
-              { k: 'protein', lbl: 'Protein (g)',  ph: '35'  },
-              { k: 'carbs',   lbl: 'Carbs (g)',    ph: '20'  },
-              { k: 'fat',     lbl: 'Fat (g)',      ph: '18'  },
-            ].map(f => React.createElement('div', { key: f.k, className: 'ig' },
-              React.createElement('label', { className: 'ilbl' }, f.lbl),
-              React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: f.ph, value: c[f.k], onChange: e => setC(p => ({ ...p, [f.k]: e.target.value })) })
-            ))
-          ),
-          React.createElement('button', { className: 'btn full', onClick: addC }, 'Add Food')
+          selectedFood
+            ? React.createElement(React.Fragment, null,
+                React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 2 } },
+                  React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                    React.createElement('label', { className: 'ilbl' }, 'Amount'),
+                    React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '100', value: customAmt, onChange: e => setCustomAmt(e.target.value) })
+                  ),
+                  React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                    React.createElement('label', { className: 'ilbl' }, 'Unit'),
+                    React.createElement('select', { className: 'inp', value: customUnit, onChange: e => setCustomUnit(e.target.value), style: { appearance: 'auto' } },
+                      ...Object.keys(unitFactors).map(u => React.createElement('option', { key: u, value: u }, u))
+                    )
+                  )
+                ),
+                (() => {
+                  const p = getPreview();
+                  return p ? React.createElement('div', {
+                    style: { background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', marginTop: 6, fontSize: 12, color: 'var(--t2)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }
+                  },
+                    React.createElement('span', null, `${p.grams}g`),
+                    React.createElement('span', { style: { color: 'var(--lime)' } }, `${p.cals} kcal`),
+                    React.createElement('span', null, `P ${p.protein}g`),
+                    React.createElement('span', null, `C ${p.carbs}g`),
+                    React.createElement('span', null, `F ${p.fat}g`)
+                  ) : null;
+                })()
+              )
+            : React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
+                ...[
+                  { k: 'cals',    lbl: 'Calories',    ph: '400' },
+                  { k: 'protein', lbl: 'Protein (g)',  ph: '35'  },
+                  { k: 'carbs',   lbl: 'Carbs (g)',    ph: '20'  },
+                  { k: 'fat',     lbl: 'Fat (g)',      ph: '18'  },
+                ].map(f => React.createElement('div', { key: f.k, className: 'ig' },
+                  React.createElement('label', { className: 'ilbl' }, f.lbl),
+                  React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: f.ph, value: c[f.k], onChange: e => setC(p => ({ ...p, [f.k]: e.target.value })) })
+                ))
+              ),
+          React.createElement('button', { className: 'btn full', style: { marginTop: 10 }, onClick: addC }, 'Add Food')
         )
       ),
 
