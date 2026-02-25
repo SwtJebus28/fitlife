@@ -1,0 +1,17 @@
+# Personal context files — keep local only
+MEMORY.md
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+*.env.local
+notification_config.json

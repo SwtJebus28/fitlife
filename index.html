@@ -1206,6 +1206,195 @@ function App() {
   </script>
 
   <script>
+  // ============================================================
+  // Security fix — CoachTab override
+  // Adds localStorage API key management + correct Anthropic headers
+  // Original CoachTab was missing: x-api-key, anthropic-version,
+  // and anthropic-dangerous-direct-browser-access (required for browser CORS)
+  // ============================================================
+
+  const _COACH_KEY = 'fitlife_anthropic_key';
+  const _getKey = () => { try { return localStorage.getItem(_COACH_KEY) || ''; } catch(e) { return ''; } };
+  const _saveKey = (k) => { try { localStorage.setItem(_COACH_KEY, k.trim()); } catch(e) {} };
+
+  function CoachTab({ history, weights }) {
+    const [msgs, setMsgs] = React.useState([{
+      role: 'assistant',
+      text: "Hey! I'm your AI fitness coach. I've read your full exercise library and know your complete profile — 56yo male, desk worker, tight hips, solo training, home gym. I also track your workout history and current weights. What can I help with?"
+    }]);
+    const [input, setInput] = React.useState('');
+    const [loading, setLoading] = React.useState(false);
+    const [apiKey, setApiKey] = React.useState(_getKey);
+    const [keyDraft, setKeyDraft] = React.useState('');
+    const [editingKey, setEditingKey] = React.useState(false);
+
+    const SUGG = [
+      "How do I progress dead hangs to pull-ups?",
+      "Best hip mobility routine for desk workers?",
+      "Should I increase my KB swing weight?",
+      "How do box jumps fit into my program?",
+      "What's the science behind Norwegian 4x4?"
+    ];
+
+    const saveKey = () => {
+      const k = keyDraft.trim();
+      if (!k) return;
+      _saveKey(k);
+      setApiKey(k);
+      setKeyDraft('');
+      setEditingKey(false);
+    };
+
+    const send = async (msg) => {
+      const txt = msg || input.trim();
+      if (!txt || loading || !apiKey) return;
+      setInput('');
+      setMsgs(m => [...m, { role: 'user', text: txt }]);
+      setLoading(true);
+      const recent = history.filter(h => h.type === 'strength').slice(0, 4).map(s => ({
+        date: s.date, workout: s.workout,
+        fails: s.sets ? Object.values(s.sets).flat().filter(x => x.status === 'fail').length : 0,
+        dones: s.sets ? Object.values(s.sets).flat().filter(x => x.status === 'done').length : 0,
+      }));
+      try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1000,
+            system: `You are a personal fitness and nutrition AI coach. Be specific, evidence-based, and encouraging.
+
+USER PROFILE:
+- 56yo male, 5'10", 198 lbs, intermediate lifter, desk worker (sits all day)
+- Goal: fat loss + muscle preservation. Targets: ${USER.targetCals} cal, ${USER.protein}g protein, ${USER.carbs}g carbs, ${USER.fat}g fat
+- Equipment: barbell + bench (solo — RPE 7 max), dumbbells, kettlebells, pull-up bar, elliptical, punching bag
+- Known issues: shoulder (avoid heavy overhead), tight hips and hamstrings (can't touch toes), lower back sensitivity
+- Interests: kettlebell training, ATG/knee-over-toe, Peter Attia longevity, Huberman Lab, Norwegian 4x4, BJJ/martial arts, VO₂ max
+
+PROGRAM:
+- A/B full body strength 3x/week (main lifts consistent + rotating accessories)
+- 5 cardio protocols: Norwegian 4×4, Heavy Bag HIIT, KB Complex, Huberman Assault Bike, Japanese Interval Walk
+- Mobility: Limber 11 pre-workout, morning CARs, hip mobility priority, BJJ shoulder stretch
+- Progression: confirm before applying. 2 fails = 10% deweight. Deload every 4 weeks or performance-triggered.
+- Cardio HR zone: ${HR_LOW}–${HR_HIGH} bpm (max HR ${MAX_HR})
+
+RECENT SESSIONS: ${JSON.stringify(recent)}
+WORKING WEIGHTS: ${JSON.stringify(weights)}
+
+Keep responses under 200 words. Prioritize joint health, longevity, and sustainable progress for a 56yo solo trainer.`,
+            messages: [...msgs.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text })), { role: 'user', content: txt }]
+          })
+        });
+        const data = await res.json();
+        if (data.error) {
+          const isAuth = data.error.type === 'authentication_error';
+          setMsgs(m => [...m, { role: 'assistant', text: isAuth ? '⚠️ Invalid API key. Tap 🔑 to update it.' : `Error: ${data.error.message}` }]);
+        } else {
+          setMsgs(m => [...m, { role: 'assistant', text: data.content?.map(c => c.text).join('') || "Couldn't connect." }]);
+        }
+      } catch(e) {
+        setMsgs(m => [...m, { role: 'assistant', text: 'Connection error. Please try again.' }]);
+      }
+      setLoading(false);
+    };
+
+    // ── API key setup screen ──────────────────────────────────
+    if (!apiKey || editingKey) {
+      return React.createElement('div', null,
+        React.createElement('div', { className: 'ph' },
+          React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+            React.createElement('div', null,
+              React.createElement('div', { className: 'ph-title' }, 'COACH'),
+              React.createElement('div', { className: 'ph-sub' }, 'AI · knows your full profile')
+            ),
+            React.createElement('div', { style: { fontSize: 32 } }, '🤖')
+          )
+        ),
+        React.createElement('div', { className: 'card', style: { marginTop: 16 } },
+          React.createElement('div', { className: 'clbl' }, '🔑 Anthropic API Key'),
+          React.createElement('div', { className: 'co amber', style: { margin: '0 0 14px' } },
+            React.createElement('strong', { style: { color: 'var(--amber)' } }, editingKey ? 'Update API Key' : 'Setup Required'),
+            React.createElement('br'),
+            editingKey
+              ? 'Enter a new key to replace the current one.'
+              : 'The AI Coach needs your Anthropic API key to work. Your key is stored only on this device — never in the app code or GitHub.'
+          ),
+          React.createElement('div', { className: 'ig' },
+            React.createElement('label', { className: 'ilbl' }, 'API Key (starts with sk-ant-)'),
+            React.createElement('input', {
+              className: 'inp',
+              type: 'password',
+              placeholder: 'sk-ant-...',
+              value: keyDraft,
+              onChange: e => setKeyDraft(e.target.value),
+              onKeyDown: e => e.key === 'Enter' && saveKey(),
+              autoComplete: 'off',
+              spellCheck: false,
+            })
+          ),
+          React.createElement('div', { style: { display: 'flex', gap: 10 } },
+            editingKey && React.createElement('button', { className: 'btn ghost', onClick: () => { setEditingKey(false); setKeyDraft(''); } }, 'Cancel'),
+            React.createElement('button', { className: 'btn full', onClick: saveKey, disabled: !keyDraft.trim().startsWith('sk-') }, 'Save Key')
+          )
+        ),
+        React.createElement('div', { className: 'co blue', style: { marginTop: 4 } },
+          React.createElement('strong', { style: { color: 'var(--blue)' } }, 'Get a free API key'),
+          React.createElement('br'),
+          React.createElement('a', { href: 'https://console.anthropic.com', target: '_blank', style: { color: 'var(--blue)' } }, 'console.anthropic.com'),
+          ' → API Keys → Create Key. New accounts include free credits.'
+        )
+      );
+    }
+
+    // ── Main chat interface ───────────────────────────────────
+    return React.createElement('div', null,
+      React.createElement('div', { className: 'ph' },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+          React.createElement('div', null,
+            React.createElement('div', { className: 'ph-title' }, 'COACH'),
+            React.createElement('div', { className: 'ph-sub' }, 'AI · knows your full profile')
+          ),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+            React.createElement('button', {
+              onClick: () => { setEditingKey(true); setKeyDraft(''); },
+              style: { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', opacity: 0.5 },
+              title: 'Update API key'
+            }, '🔑'),
+            React.createElement('div', { style: { fontSize: 32 } }, '🤖')
+          )
+        )
+      ),
+      msgs.length <= 1 && React.createElement('div', { style: { padding: '10px 16px 0', display: 'flex', flexWrap: 'wrap' } },
+        SUGG.map((s, i) => React.createElement('span', { key: i, className: 'pill', onClick: () => send(s) }, s))
+      ),
+      React.createElement('div', { style: { padding: '12px 16px 0' } },
+        msgs.map((m, i) => React.createElement('div', { key: i, className: `bubble fade ${m.role === 'user' ? 'user' : ''}` }, m.text)),
+        loading && React.createElement('div', { className: 'bubble' },
+          React.createElement('span', { className: 'spin', style: { width: 14, height: 14 } }),
+          React.createElement('span', { style: { fontSize: 12, color: 'var(--t2)', marginLeft: 8 } }, 'Thinking...')
+        )
+      ),
+      React.createElement('div', { style: { padding: '10px 16px', display: 'flex', gap: 8, position: 'sticky', bottom: 'calc(var(--nav) + 6px)' } },
+        React.createElement('input', {
+          className: 'inp',
+          placeholder: 'Ask anything...',
+          value: input,
+          onChange: e => setInput(e.target.value),
+          onKeyDown: e => e.key === 'Enter' && send()
+        }),
+        React.createElement('button', { className: 'btn', onClick: () => send(), disabled: loading || !input.trim() }, 'Send')
+      )
+    );
+  }
+  </script>
+
+  <script>
     // Mount the app
     try {
       const container = document.getElementById('root');
