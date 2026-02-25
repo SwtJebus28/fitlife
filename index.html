@@ -1165,7 +1165,23 @@ function App() {
         protein: Math.round((tl.protein + (+(food.protein || 0))) * 10) / 10,
         fat:     Math.round((tl.fat     + (+(food.fat     || 0))) * 10) / 10,
         carbs:   Math.round((tl.carbs   + (+(food.carbs   || 0))) * 10) / 10,
-        items: [...(tl.items || []), food.name],
+        items: [...(tl.items || []), { name: food.name, cals: +(food.cals||0), protein: +(food.protein||0), carbs: +(food.carbs||0), fat: +(food.fat||0) }],
+      };
+      const nn = [u, ...nutrition.filter(n => n.date !== today)];
+      setNutrition(nn);
+      await sset('nutrition', nn);
+    };
+
+    const removeItem = async (idx) => {
+      const item = (tl.items || [])[idx];
+      const isObj = item && typeof item === 'object';
+      const u = {
+        ...tl,
+        cals:    Math.max(0, Math.round(tl.cals    - (isObj ? item.cals    : 0))),
+        protein: Math.max(0, Math.round((tl.protein - (isObj ? item.protein : 0)) * 10) / 10),
+        fat:     Math.max(0, Math.round((tl.fat     - (isObj ? item.fat     : 0)) * 10) / 10),
+        carbs:   Math.max(0, Math.round((tl.carbs   - (isObj ? item.carbs   : 0)) * 10) / 10),
+        items: (tl.items || []).filter((_, i) => i !== idx),
       };
       const nn = [u, ...nutrition.filter(n => n.date !== today)];
       setNutrition(nn);
@@ -1320,9 +1336,18 @@ function App() {
         ),
         (tl.items || []).length > 0 && React.createElement('div', { className: 'card' },
           React.createElement('div', { className: 'clbl' }, 'Logged Today'),
-          ...(tl.items || []).map((item, i) =>
-            React.createElement('div', { key: i, style: { fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--border)', color: 'var(--t2)' } }, item)
-          )
+          ...(tl.items || []).map((item, i) => {
+            const name = typeof item === 'object' ? item.name : item;
+            const cals = typeof item === 'object' ? item.cals : null;
+            return React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' } },
+              React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t2)' } }, name),
+              cals != null && React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)', marginRight: 10 } }, `${cals} cal`),
+              React.createElement('span', {
+                style: { fontSize: 20, color: 'var(--t3)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 },
+                onClick: () => removeItem(i)
+              }, '×')
+            );
+          })
         ),
         React.createElement('div', { className: 'co lime', style: { marginTop: 10 } },
           React.createElement('strong', { style: { color: 'var(--lime)' } }, '💡 Protein First'),
