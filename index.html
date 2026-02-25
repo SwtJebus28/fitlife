@@ -787,7 +787,7 @@ function App() {
   // Open Food Facts API (free, no key) for nutrition lookup
   // ============================================================
 
-  function BarcodeScanner({ onAdd, onClose, onRescan, onSave, addLabel = '+ Add to Log' }) {
+  function BarcodeScanner({ onAdd, onClose, onRescan, onSave, addLabel = '+ Add to Log', onScanLabel }) {
     const hasNative = 'BarcodeDetector' in window;
     const [phase, setPhase] = React.useState('init');
     // phases: init | scanning | loading | found | notfound | error | unsupported
@@ -810,34 +810,58 @@ function App() {
 
     const lookup = async (barcode) => {
       setPhase('loading');
+      const setFound = (f) => { setFood(f); setGrams(String(Math.round(f.servingQty))); setPhase('found'); };
+
+      // 1. Open Food Facts
       try {
         const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
-        if (!res.ok) throw new Error('Network error');
-        const data = await res.json();
-        if (data.status === 1 && data.product) {
-          const p = data.product;
-          const n = p.nutriments || {};
-          const servingQty = parseFloat(p.serving_quantity) || 100;
-          setFood({
-            name: (p.product_name || p.generic_name || 'Scanned Product').trim(),
-            cals100: Math.round(n['energy-kcal_100g'] || n['energy-kcal'] || 0),
-            protein100: +((n.proteins_100g || 0).toFixed(1)),
-            carbs100: +((n.carbohydrates_100g || 0).toFixed(1)),
-            fat100: +((n.fat_100g || 0).toFixed(1)),
-            servingSize: p.serving_size || `${Math.round(servingQty)}g`,
-            servingQty,
-            barcode,
-          });
-          setGrams(String(Math.round(servingQty)));
-          setPhase('found');
-        } else {
-          setErrMsg('Barcode not found in Open Food Facts database. Enter manually.');
-          setPhase('notfound');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 1 && data.product) {
+            const p = data.product; const n = p.nutriments || {};
+            const servingQty = parseFloat(p.serving_quantity) || 100;
+            return setFound({
+              name: (p.product_name || p.generic_name || 'Scanned Product').trim(),
+              cals100: Math.round(n['energy-kcal_100g'] || n['energy-kcal'] || 0),
+              protein100: +((n.proteins_100g || 0).toFixed(1)),
+              carbs100: +((n.carbohydrates_100g || 0).toFixed(1)),
+              fat100: +((n.fat_100g || 0).toFixed(1)),
+              servingSize: p.serving_size || `${Math.round(servingQty)}g`,
+              servingQty, barcode, source: 'Open Food Facts',
+            });
+          }
         }
-      } catch(e) {
-        setErrMsg('Could not reach food database. Check your internet connection.');
-        setPhase('error');
-      }
+      } catch(e) {}
+
+      // 2. USDA FoodData Central (free, no key required, good branded supplement coverage)
+      try {
+        const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(barcode)}&api_key=DEMO_KEY&dataType=Branded&pageSize=1`);
+        if (res.ok) {
+          const data = await res.json();
+          const f = data.foods && data.foods[0];
+          if (f) {
+            const nmap = {};
+            (f.foodNutrients || []).forEach(n => { nmap[n.nutrientId] = n.value; });
+            const servingQty = f.servingSize || 100;
+            const unit = (f.servingSizeUnit || 'g').toLowerCase();
+            // USDA FDC branded nutrients are per 100g
+            return setFound({
+              name: (f.description || 'Scanned Product').split(',')[0].trim(),
+              cals100: Math.round(nmap[1008] || nmap[1062] || 0),
+              protein100: +((nmap[1003] || 0).toFixed(1)),
+              carbs100: +((nmap[1005] || 0).toFixed(1)),
+              fat100: +((nmap[1004] || 0).toFixed(1)),
+              servingSize: `${servingQty}${unit}`,
+              servingQty: unit === 'g' ? servingQty : 100,
+              barcode, source: 'USDA',
+            });
+          }
+        }
+      } catch(e) {}
+
+      // Not found in any database
+      setErrMsg('Not found in food databases. Scan the label or enter manually.');
+      setPhase('notfound');
     };
 
     React.useEffect(() => {
@@ -1114,7 +1138,152 @@ function App() {
         phase === 'unsupported' ? unsupportedMsg : errMsg
       ),
       phase !== 'unsupported' && React.createElement('button', { className: 'btn ghost', onClick: onRescan }, 'Try Again'),
+      phase === 'notfound' && onScanLabel && React.createElement('button', {
+        className: 'btn ghost',
+        style: { borderColor: 'var(--blue)', color: 'var(--blue)' },
+        onClick: () => { onClose(); onScanLabel(); }
+      }, '📸 Scan Label Instead'),
       React.createElement('button', { className: 'btn', onClick: onClose }, 'Enter Manually')
+    ));
+  }
+
+  // ============================================================
+  // LabelScanner — Claude Vision photo-to-nutrition extraction
+  // Takes a photo of any Nutrition Facts / Supplement Facts label,
+  // sends to Claude API, returns structured macro data.
+  // ============================================================
+  function LabelScanner({ onResult, onClose, mode = 'food' }) {
+    const [phase, setPhase] = React.useState('idle'); // idle|loading|done|error
+    const [result, setResult] = React.useState(null);
+    const [errMsg, setErrMsg] = React.useState('');
+    const [previewUrl, setPreviewUrl] = React.useState(null);
+    const fileRef = React.useRef(null);
+
+    const reset = () => { setPhase('idle'); setResult(null); setErrMsg(''); setPreviewUrl(null); if (fileRef.current) fileRef.current.value = ''; };
+
+    const handleFile = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setPreviewUrl(URL.createObjectURL(file));
+      setPhase('loading');
+
+      // Resize to max 1200px to keep payload manageable
+      const toBase64 = () => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1200;
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(cv.toDataURL('image/jpeg', 0.85).split(',')[1]);
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+
+      try {
+        const b64 = await toBase64();
+        const apiKey = typeof _getKey === 'function' ? _getKey() : localStorage.getItem('fitlife_anthropic_key') || '';
+        if (!apiKey) { setErrMsg('Claude API key not set. Go to the Coach tab to add your key.'); setPhase('error'); return; }
+
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 300,
+            messages: [{ role: 'user', content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+              { type: 'text', text: 'This is a Nutrition Facts or Supplement Facts label. Extract the data and return ONLY a JSON object, no other text: {"name":"product name","serving_g":30,"cals100":120,"protein100":25,"carbs100":5,"fat100":2} where cals100/protein100/carbs100/fat100 are per 100g (convert from per-serving values using the serving size). For capsules/softgels/tablets use serving_g=1.' }
+            ]}],
+          }),
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error?.message || `API error ${res.status}`); }
+        const data = await res.json();
+        const text = data.content[0].text;
+        const match = text.match(/\{[\s\S]*?\}/);
+        if (!match) throw new Error('No structured data found in label');
+        const parsed = JSON.parse(match[0]);
+        if (parsed.cals100 == null) throw new Error('Could not read nutrition values');
+        setResult(parsed);
+        setPhase('done');
+      } catch(err) {
+        setErrMsg(err.message || 'Failed to read label');
+        setPhase('error');
+      }
+    };
+
+    const wrap = ch => React.createElement('div', {
+      style: { position: 'fixed', inset: 0, zIndex: 1000, background: '#090909', display: 'flex', flexDirection: 'column' }
+    }, ch);
+
+    if (phase === 'idle') return wrap(React.createElement('div', {
+      style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, gap: 20, textAlign: 'center' }
+    },
+      React.createElement('div', { style: { fontSize: 52 } }, '📸'),
+      React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 22, color: 'var(--text)', letterSpacing: 1 } }, 'SCAN LABEL'),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--t3)', maxWidth: 280, lineHeight: 1.7 } },
+        mode === 'supp'
+          ? 'Photo the Supplement Facts panel. Claude reads it and extracts serving size, calories, and macros.'
+          : 'Photo the Nutrition Facts panel. Works on any packaged food or supplement — no barcode needed.'
+      ),
+      React.createElement('input', { ref: fileRef, type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' }, onChange: handleFile }),
+      React.createElement('button', { className: 'btn', style: { fontSize: 15, gap: 8, marginTop: 4 }, onClick: () => fileRef.current && fileRef.current.click() }, '📷 Take Photo'),
+      React.createElement('button', { className: 'btn ghost', onClick: onClose }, 'Cancel')
+    ));
+
+    if (phase === 'loading') return wrap(React.createElement('div', {
+      style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20 }
+    },
+      previewUrl && React.createElement('img', { src: previewUrl, style: { width: 220, height: 160, objectFit: 'cover', borderRadius: 12, opacity: 0.55 } }),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--t3)', lineHeight: 1.6 } }, 'Claude is reading the label…')
+    ));
+
+    if (phase === 'error') return wrap(React.createElement('div', {
+      style: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16, textAlign: 'center' }
+    },
+      React.createElement('div', { style: { fontSize: 44 } }, '⚠️'),
+      React.createElement('div', { style: { fontSize: 13, color: '#9090a0', maxWidth: 300, lineHeight: 1.6 } }, errMsg),
+      React.createElement('button', { className: 'btn ghost', onClick: reset }, 'Try Again'),
+      React.createElement('button', { className: 'btn', onClick: onClose }, 'Enter Manually')
+    ));
+
+    // phase === 'done'
+    const r = result;
+    const g = r.serving_g || 100;
+    const scale = g / 100;
+    const preview = [
+      { v: Math.round(r.cals100 * scale), l: 'cal', c: 'var(--lime)' },
+      { v: `${((r.protein100||0) * scale).toFixed(1)}g`, l: 'protein', c: 'var(--blue)' },
+      { v: `${((r.carbs100||0) * scale).toFixed(1)}g`, l: 'carbs', c: 'var(--purple)' },
+      { v: `${((r.fat100||0) * scale).toFixed(1)}g`, l: 'fat', c: 'var(--amber)' },
+    ];
+    return wrap(React.createElement('div', { style: { flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 } },
+      React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 20, color: 'var(--text)', letterSpacing: .5 } }, 'LABEL READ'),
+      previewUrl && React.createElement('img', { src: previewUrl, style: { width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 10, opacity: 0.65 } }),
+      React.createElement('div', { className: 'card' },
+        React.createElement('div', { style: { fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 4 } }, r.name || 'Scanned Product'),
+        React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginBottom: 14 } }, `Per serving · ${g}g`),
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-around', textAlign: 'center' } },
+          ...preview.map((s, i) => React.createElement('div', { key: i },
+            React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 28, color: s.c, lineHeight: 1 } }, s.v),
+            React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', marginTop: 2 } }, s.l)
+          ))
+        )
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: 10 } },
+        React.createElement('button', { className: 'btn ghost', onClick: reset }, 'Retake'),
+        React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center' },
+          onClick: () => onResult({ name: r.name || 'Scanned Product', cals100: r.cals100||0, protein100: r.protein100||0, carbs100: r.carbs100||0, fat100: r.fat100||0, defaultGrams: g, barcode: null })
+        }, mode === 'supp' ? '+ Add to Stack' : '+ Add to Log')
+      )
     ));
   }
 
@@ -1147,6 +1316,8 @@ function App() {
     const [c, setC] = React.useState({ name: '', cals: '', protein: '', fat: '', carbs: '' });
     const [showScanner, setShowScanner] = React.useState(false);
     const [scanKey, setScanKey] = React.useState(0);
+    const [showLabelScanner, setShowLabelScanner] = React.useState(false);
+    const [labelScanMode, setLabelScanMode] = React.useState('food');
 
     // Supplements
     const [suppStack, setSuppStack] = React.useState(_getSupps);
@@ -1347,18 +1518,34 @@ function App() {
     const left = USER.targetCals - tl.cals;
 
     return React.createElement('div', null,
-      // ── Barcode scanner overlays (remount on rescan via key) ──
+      // ── Barcode scanner + label scanner overlays ──────────────
+      showLabelScanner && React.createElement(LabelScanner, {
+        mode: labelScanMode,
+        onClose: () => setShowLabelScanner(false),
+        onResult: (raw) => {
+          setShowLabelScanner(false);
+          if (labelScanMode === 'supp') {
+            setSuppConfig({ name: raw.name, isMacro: raw.cals100 > 10, timing: 'anytime', cals100: raw.cals100, protein100: raw.protein100, carbs100: raw.carbs100, fat100: raw.fat100, defaultGrams: raw.defaultGrams, defaultUnit: 'g' });
+            setView('supps');
+          } else {
+            saveToMyFoods(raw);
+            add({ name: `${raw.name} (${raw.defaultGrams}g)`, cals: Math.round(raw.cals100 * raw.defaultGrams / 100), protein: Math.round(raw.protein100 * raw.defaultGrams / 100 * 10) / 10, carbs: Math.round(raw.carbs100 * raw.defaultGrams / 100 * 10) / 10, fat: Math.round(raw.fat100 * raw.defaultGrams / 100 * 10) / 10 });
+          }
+        },
+      }),
       showScanner && React.createElement(BarcodeScanner, {
         key: scanKey,
         onAdd: food => add(food),
         onClose: () => setShowScanner(false),
         onRescan: () => setScanKey(k => k + 1),
         onSave: raw => saveToMyFoods(raw),
+        onScanLabel: () => { setLabelScanMode('food'); setShowLabelScanner(true); },
       }),
       showSuppScanner && React.createElement(BarcodeScanner, {
         key: 'supp-' + suppScanKey,
         addLabel: '+ Add to Stack',
         onSave: raw => setPendingSuppRaw(raw),
+        onScanLabel: () => { setLabelScanMode('supp'); setShowLabelScanner(true); },
         onAdd: (food) => {
           const raw = pendingSuppRaw;
           setShowSuppScanner(false);
@@ -1462,8 +1649,13 @@ function App() {
             ' Scan Food Barcode'
           ),
           React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 } },
-            'Point at any packaged food barcode — nutrition auto-fills from Open Food Facts'
-          )
+            'Tries Open Food Facts then USDA — covers most packaged foods'
+          ),
+          React.createElement('button', {
+            className: 'btn ghost',
+            style: { width: '100%', justifyContent: 'center', gap: 8, marginTop: 8, fontSize: 14, borderColor: 'var(--blue)', color: 'var(--blue)' },
+            onClick: () => { setLabelScanMode('food'); setShowLabelScanner(true); }
+          }, '📸 Scan Nutrition Label  ·  Claude reads any label')
         ),
         // My Foods card — only shown after first scan save
         myFoods.length > 0 && React.createElement('div', { className: 'card' },
@@ -1674,7 +1866,12 @@ function App() {
             React.createElement('button', { className: 'btn ghost', style: { flex: 1, justifyContent: 'center', fontSize: 13 },
               onClick: () => setShowSuppManual(true)
             }, '+ Enter Manually')
-          )
+          ),
+          React.createElement('button', {
+            className: 'btn ghost',
+            style: { width: '100%', justifyContent: 'center', fontSize: 13, marginTop: 8, borderColor: 'var(--blue)', color: 'var(--blue)' },
+            onClick: () => { setLabelScanMode('supp'); setShowLabelScanner(true); }
+          }, '📸 Scan Supplement Label  ·  Claude reads any label')
         ),
 
         // Recommended card
