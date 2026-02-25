@@ -787,7 +787,7 @@ function App() {
   // Open Food Facts API (free, no key) for nutrition lookup
   // ============================================================
 
-  function BarcodeScanner({ onAdd, onClose, onRescan }) {
+  function BarcodeScanner({ onAdd, onClose, onRescan, onSave, addLabel = '+ Add to Log' }) {
     const hasNative = 'BarcodeDetector' in window;
     const [phase, setPhase] = React.useState('init');
     // phases: init | scanning | loading | found | notfound | error | unsupported
@@ -1098,7 +1098,7 @@ function App() {
         ),
         React.createElement('div', { style: { display: 'flex', gap: 10 } },
           React.createElement('button', { className: 'btn ghost', onClick: onRescan }, 'Rescan'),
-          React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center' }, onClick: handleAdd }, '+ Add to Log')
+          React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center' }, onClick: handleAdd }, addLabel)
         )
       ));
     }
@@ -1125,6 +1125,21 @@ function App() {
   const _getMyFoods = () => { try { return JSON.parse(localStorage.getItem(MY_FOODS_KEY) || '[]'); } catch(e) { return []; } };
   const _saveMyFoodsLS = (arr) => { try { localStorage.setItem(MY_FOODS_KEY, JSON.stringify(arr)); } catch(e) {} };
 
+  const SUPPS_KEY = 'fitlife_supps';
+  const _getSupps = () => { try { return JSON.parse(localStorage.getItem(SUPPS_KEY) || '[]'); } catch(e) { return []; } };
+  const _saveSupps = (arr) => { try { localStorage.setItem(SUPPS_KEY, JSON.stringify(arr)); } catch(e) {} };
+
+  const RECOMMENDED_SUPPS = [
+    { id: 'rec_creatine', name: 'Creatine Monohydrate', isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 5,   defaultUnit: 'g',    timing: 'anytime',      note: 'Muscle preservation, strength, cognitive health. Most researched supplement. 5g/day.' },
+    { id: 'rec_d3k2',     name: 'Vitamin D3 + K2',      isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'cap',  timing: 'morning',      note: 'Critical for testosterone, bone density, immune function. Most desk workers are deficient.' },
+    { id: 'rec_omega3',   name: 'Omega-3 (EPA+DHA)',     isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 3,   defaultUnit: 'g',    timing: 'morning',      note: '2–3g EPA+DHA daily. Anti-inflammatory, joint health, cardiovascular.' },
+    { id: 'rec_mag',      name: 'Magnesium Glycinate',   isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 400, defaultUnit: 'mg',   timing: 'bedtime',      note: '300–400mg before bed. Sleep quality, muscle recovery, glucose metabolism.' },
+    { id: 'rec_collagen', name: 'Collagen Peptides',     isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 15,  defaultUnit: 'g',    timing: 'pre-workout',  note: 'Take with Vit C 30 min before training. Tendon & joint health — key for hip tightness.' },
+    { id: 'rec_nad',      name: 'NAD+ (NMN/NR)',         isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'cap',  timing: 'morning',      note: 'Mitochondrial energy, cellular repair. Peter Attia longevity protocol.' },
+    { id: 'rec_fiber',    name: 'Fiber Supplement',      isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'srv',  timing: 'morning',      note: 'Digestive health, satiety during fat loss. Aim 25–35g total fiber/day.' },
+    { id: 'rec_whey',     name: 'Whey Protein',          isMacro: true,  cals100: 370, protein100: 80, carbs100: 8, fat100: 4, defaultGrams: 30, defaultUnit: 'g',  timing: 'post-workout', note: 'Safety net for hitting 175g/day protein. ~25g protein per 30g scoop.' },
+  ];
+
   function NutritionTab({ nutrition, setNutrition }) {
     const today = new Date().toDateString();
     const tl = nutrition.find(n => n.date === today) || { date: today, cals: 0, protein: 0, fat: 0, carbs: 0, items: [] };
@@ -1132,6 +1147,15 @@ function App() {
     const [c, setC] = React.useState({ name: '', cals: '', protein: '', fat: '', carbs: '' });
     const [showScanner, setShowScanner] = React.useState(false);
     const [scanKey, setScanKey] = React.useState(0);
+
+    // Supplements
+    const [suppStack, setSuppStack] = React.useState(_getSupps);
+    const [showSuppScanner, setShowSuppScanner] = React.useState(false);
+    const [suppScanKey, setSuppScanKey] = React.useState(0);
+    const [pendingSuppRaw, setPendingSuppRaw] = React.useState(null);
+    const [suppConfig, setSuppConfig] = React.useState(null);
+    const [showSuppManual, setShowSuppManual] = React.useState(false);
+    const [suppManual, setSuppManual] = React.useState({ name: '', timing: 'anytime', isMacro: false, defaultGrams: '', defaultUnit: 'g' });
 
     // My Foods
     const [myFoods, setMyFoods] = React.useState(_getMyFoods);
@@ -1156,6 +1180,45 @@ function App() {
         _saveMyFoodsLS(next);
         return next;
       });
+    };
+
+    const saveSuppStack = (arr) => { _saveSupps(arr); setSuppStack(arr); };
+
+    const addToStack = (supp) => {
+      if (suppStack.find(s => s.name.toLowerCase() === supp.name.toLowerCase())) return;
+      saveSuppStack([...suppStack, { ...supp, id: supp.id || Date.now() }]);
+    };
+
+    const removeFromStack = (id) => {
+      saveSuppStack(suppStack.filter(s => s.id !== id));
+    };
+
+    const toggleSupp = async (supp) => {
+      const checked = !!(tl.supps && tl.supps[supp.id]);
+      const newSupps = { ...(tl.supps || {}), [supp.id]: !checked };
+      let u = { ...tl, supps: newSupps };
+      // Macro supplement: add to Fuel totals when checking, not when unchecking
+      if (supp.isMacro && !checked) {
+        const g = supp.defaultGrams || 30;
+        const scale = g / 100;
+        u = {
+          ...u,
+          cals:    Math.round(u.cals    + (supp.cals100    || 0) * scale),
+          protein: Math.round((u.protein + (supp.protein100 || 0) * scale) * 10) / 10,
+          carbs:   Math.round((u.carbs   + (supp.carbs100   || 0) * scale) * 10) / 10,
+          fat:     Math.round((u.fat     + (supp.fat100     || 0) * scale) * 10) / 10,
+          items: [...(u.items || []), {
+            name: `${supp.name} (${g}${supp.defaultUnit || 'g'})`,
+            cals:    Math.round((supp.cals100    || 0) * scale),
+            protein: Math.round((supp.protein100 || 0) * scale * 10) / 10,
+            carbs:   Math.round((supp.carbs100   || 0) * scale * 10) / 10,
+            fat:     Math.round((supp.fat100     || 0) * scale * 10) / 10,
+          }],
+        };
+      }
+      const nn = [u, ...nutrition.filter(n => n.date !== today)];
+      setNutrition(nn);
+      await sset('nutrition', nn);
     };
 
     const add = async (food) => {
@@ -1284,13 +1347,42 @@ function App() {
     const left = USER.targetCals - tl.cals;
 
     return React.createElement('div', null,
-      // ── Barcode scanner overlay (remounts on rescan via key) ──
+      // ── Barcode scanner overlays (remount on rescan via key) ──
       showScanner && React.createElement(BarcodeScanner, {
         key: scanKey,
         onAdd: food => add(food),
         onClose: () => setShowScanner(false),
         onRescan: () => setScanKey(k => k + 1),
         onSave: raw => saveToMyFoods(raw),
+      }),
+      showSuppScanner && React.createElement(BarcodeScanner, {
+        key: 'supp-' + suppScanKey,
+        addLabel: '+ Add to Stack',
+        onSave: raw => setPendingSuppRaw(raw),
+        onAdd: (food) => {
+          const raw = pendingSuppRaw;
+          setShowSuppScanner(false);
+          setPendingSuppRaw(null);
+          setSuppConfig({
+            name: raw ? raw.name : food.name.replace(/ \(\d+g\)$/, ''),
+            isMacro: food.cals > 10,
+            timing: 'anytime',
+            cals100: raw ? raw.cals100 : 0,
+            protein100: raw ? raw.protein100 : 0,
+            carbs100: raw ? raw.carbs100 : 0,
+            fat100: raw ? raw.fat100 : 0,
+            defaultGrams: raw ? raw.defaultGrams : 100,
+            defaultUnit: 'g',
+          });
+          setView('supps');
+        },
+        onClose: () => {
+          const hadRaw = !!pendingSuppRaw;
+          setShowSuppScanner(false);
+          setPendingSuppRaw(null);
+          if (!hadRaw) { setShowSuppManual(true); setView('supps'); }
+        },
+        onRescan: () => setSuppScanKey(k => k + 1),
       }),
 
       // ── Page header ──────────────────────────────────────────
@@ -1301,9 +1393,9 @@ function App() {
 
       // ── Sub-tabs ─────────────────────────────────────────────
       React.createElement('div', { className: 'tabs' },
-        ...['today','log','targets'].map((v, i) =>
+        ...['today','log','supps','targets'].map((v, i) =>
           React.createElement('div', { key: v, className: `tab ${view === v ? 'on' : ''}`, onClick: () => setView(v) },
-            ['Today','Log Food','Targets'][i]
+            ['Today','Log Food','Supps','Targets'][i]
           )
         )
       ),
@@ -1466,6 +1558,142 @@ function App() {
               ),
           React.createElement('button', { className: 'btn full', style: { marginTop: 10 }, onClick: addC }, 'Add Food')
         )
+      ),
+
+      // ── Supps view ───────────────────────────────────────────
+      view === 'supps' && React.createElement(React.Fragment, null,
+        // Config panel — shown after scan or manual entry
+        (suppConfig || showSuppManual) && React.createElement('div', {
+          className: 'card', style: { marginTop: 10, border: '1px solid var(--lime)', borderRadius: 14 }
+        },
+          React.createElement('div', { className: 'clbl' }, suppConfig ? 'Confirm Supplement' : 'Add Supplement'),
+          React.createElement('div', { className: 'ig' },
+            React.createElement('label', { className: 'ilbl' }, 'Name'),
+            React.createElement('input', { className: 'inp', placeholder: 'e.g. Creatine Monohydrate',
+              value: suppConfig ? suppConfig.name : suppManual.name,
+              onChange: e => suppConfig ? setSuppConfig(p => ({...p, name: e.target.value})) : setSuppManual(p => ({...p, name: e.target.value}))
+            })
+          ),
+          React.createElement('div', { style: { display: 'flex', gap: 8 } },
+            React.createElement('div', { className: 'ig', style: { flex: 2 } },
+              React.createElement('label', { className: 'ilbl' }, 'Timing'),
+              React.createElement('select', { className: 'inp', style: { appearance: 'auto' },
+                value: suppConfig ? suppConfig.timing : suppManual.timing,
+                onChange: e => suppConfig ? setSuppConfig(p => ({...p, timing: e.target.value})) : setSuppManual(p => ({...p, timing: e.target.value}))
+              },
+                ...['morning','pre-workout','post-workout','bedtime','anytime'].map(t =>
+                  React.createElement('option', { key: t, value: t }, t.charAt(0).toUpperCase() + t.slice(1))
+                )
+              )
+            ),
+            React.createElement('div', { className: 'ig', style: { flex: 1 } },
+              React.createElement('label', { className: 'ilbl' }, 'Amount'),
+              React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '5',
+                value: suppConfig ? suppConfig.defaultGrams : suppManual.defaultGrams,
+                onChange: e => suppConfig ? setSuppConfig(p => ({...p, defaultGrams: e.target.value})) : setSuppManual(p => ({...p, defaultGrams: e.target.value}))
+              })
+            ),
+            React.createElement('div', { className: 'ig', style: { flex: 1 } },
+              React.createElement('label', { className: 'ilbl' }, 'Unit'),
+              React.createElement('select', { className: 'inp', style: { appearance: 'auto' },
+                value: suppConfig ? suppConfig.defaultUnit : suppManual.defaultUnit,
+                onChange: e => suppConfig ? setSuppConfig(p => ({...p, defaultUnit: e.target.value})) : setSuppManual(p => ({...p, defaultUnit: e.target.value}))
+              },
+                ...['g','mg','ml','cap','srv','tsp','tbsp'].map(u => React.createElement('option', { key: u, value: u }, u))
+              )
+            )
+          ),
+          React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 4 } },
+            React.createElement('input', { type: 'checkbox',
+              checked: suppConfig ? suppConfig.isMacro : suppManual.isMacro,
+              onChange: e => suppConfig ? setSuppConfig(p => ({...p, isMacro: e.target.checked})) : setSuppManual(p => ({...p, isMacro: e.target.checked}))
+            }),
+            React.createElement('span', { style: { fontSize: 13, color: 'var(--t2)' } }, 'Counts toward daily calorie & macro totals')
+          ),
+          React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 10 } },
+            React.createElement('button', { className: 'btn ghost',
+              onClick: () => { setSuppConfig(null); setShowSuppManual(false); setSuppManual({ name: '', timing: 'anytime', isMacro: false, defaultGrams: '', defaultUnit: 'g' }); }
+            }, 'Cancel'),
+            React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center' },
+              onClick: () => {
+                const src = suppConfig || suppManual;
+                if (!src.name) return;
+                addToStack({ ...src, defaultGrams: parseFloat(src.defaultGrams) || 5 });
+                setSuppConfig(null);
+                setShowSuppManual(false);
+                setSuppManual({ name: '', timing: 'anytime', isMacro: false, defaultGrams: '', defaultUnit: 'g' });
+              }
+            }, 'Save to Stack')
+          )
+        ),
+
+        // My Stack card
+        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+          React.createElement('div', { className: 'clbl' }, 'My Stack'),
+          suppStack.length === 0
+            ? React.createElement('div', { style: { fontSize: 13, color: 'var(--t3)', textAlign: 'center', padding: '12px 0' } },
+                'Add supplements from Recommended below or scan a barcode'
+              )
+            : React.createElement(React.Fragment, null,
+                ...suppStack.map(s => {
+                  const checked = !!(tl.supps && tl.supps[s.id]);
+                  const timingColors = { morning: 'var(--amber)', 'pre-workout': 'var(--lime)', 'post-workout': 'var(--blue)', bedtime: 'var(--purple)', anytime: 'var(--t3)' };
+                  return React.createElement('div', { key: s.id,
+                    style: { display: 'flex', alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid var(--border)', gap: 10 }
+                  },
+                    // Checkbox
+                    React.createElement('div', {
+                      style: { width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked ? 'var(--lime)' : 'var(--border)'}`, background: checked ? 'var(--lime)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, marginTop: 1 },
+                      onClick: () => toggleSupp(s)
+                    }, checked ? React.createElement('span', { style: { color: '#000', fontSize: 12, fontWeight: 'bold', lineHeight: 1 } }, '✓') : null),
+                    // Info
+                    React.createElement('div', { style: { flex: 1 } },
+                      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                        React.createElement('span', { style: { fontSize: 14, color: checked ? 'var(--t2)' : 'var(--text)', textDecoration: checked ? 'line-through' : 'none' } }, s.name),
+                        s.isMacro && React.createElement('span', { style: { fontSize: 10, color: 'var(--lime)', border: '1px solid var(--lime)', borderRadius: 4, padding: '1px 5px' } }, 'FUEL')
+                      ),
+                      React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 3 } },
+                        React.createElement('span', { style: { fontSize: 11, color: timingColors[s.timing] || 'var(--t3)' } }, s.timing),
+                        s.defaultGrams && React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)' } }, `${s.defaultGrams}${s.defaultUnit || 'g'}`)
+                      )
+                    ),
+                    // Delete
+                    React.createElement('span', { style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }, onClick: () => removeFromStack(s.id) }, '×')
+                  );
+                })
+              )
+        ),
+
+        // Add supplement card
+        React.createElement('div', { className: 'card' },
+          React.createElement('div', { className: 'clbl' }, 'Add Supplement'),
+          React.createElement('div', { style: { display: 'flex', gap: 10 } },
+            React.createElement('button', { className: 'btn ghost', style: { flex: 1, justifyContent: 'center', fontSize: 13 },
+              onClick: () => { setPendingSuppRaw(null); setShowSuppScanner(true); }
+            }, '📷 Scan Barcode'),
+            React.createElement('button', { className: 'btn ghost', style: { flex: 1, justifyContent: 'center', fontSize: 13 },
+              onClick: () => setShowSuppManual(true)
+            }, '+ Enter Manually')
+          )
+        ),
+
+        // Recommended card
+        (() => {
+          const stackNames = suppStack.map(s => s.name.toLowerCase());
+          const remaining = RECOMMENDED_SUPPS.filter(r => !stackNames.includes(r.name.toLowerCase()));
+          return remaining.length > 0 ? React.createElement('div', { className: 'card' },
+            React.createElement('div', { className: 'clbl' }, 'Recommended for 56yo Male'),
+            ...remaining.map(r => React.createElement('div', { key: r.id,
+              style: { padding: '10px 0', borderBottom: '1px solid var(--border)' }
+            },
+              React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 } },
+                React.createElement('span', { style: { fontSize: 14, color: 'var(--text)', fontWeight: 500 } }, r.name),
+                React.createElement('button', { className: 'btn ghost', style: { padding: '4px 10px', fontSize: 12 }, onClick: () => addToStack(r) }, '+ Add')
+              ),
+              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', lineHeight: 1.55 } }, r.note)
+            ))
+          ) : null;
+        })()
       ),
 
       // ── Targets view ─────────────────────────────────────────
