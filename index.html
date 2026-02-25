@@ -776,22 +776,27 @@ function App() {
 
   </script>
 
+  <!-- Quagga2: JS barcode scanner (Safari/iOS fallback — BarcodeDetector is Chromium-only) -->
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
+
   <script>
   // ============================================================
   // Sprint 1 — Camera Barcode Scanner for Nutrition
-  // Uses native BarcodeDetector API (iOS 17+ / Chrome 83+)
+  // Chrome: native BarcodeDetector API
+  // Safari/iOS: Quagga2 library (BarcodeDetector not in WebKit)
   // Open Food Facts API (free, no key) for nutrition lookup
   // ============================================================
 
   function BarcodeScanner({ onAdd, onClose, onRescan }) {
+    const hasNative = 'BarcodeDetector' in window;
     const [phase, setPhase] = React.useState('init');
     // phases: init | scanning | loading | found | notfound | error | unsupported
     const [food, setFood] = React.useState(null);
     const [grams, setGrams] = React.useState('100');
     const [errMsg, setErrMsg] = React.useState('');
-    const [debugInfo, setDebugInfo] = React.useState('');
     const videoRef = React.useRef(null);
     const streamRef = React.useRef(null);
+    const quaggaRef = React.useRef(null);
     const activeRef = React.useRef(true);
 
     const stopCamera = () => {
@@ -836,76 +841,126 @@ function App() {
     };
 
     React.useEffect(() => {
-      if (!('BarcodeDetector' in window)) {
-        const ua = navigator.userAgent || '';
-        const ios = ua.match(/OS [\d_]+/);
-        setDebugInfo(`BD:${typeof window.BarcodeDetector} | MD:${!!navigator.mediaDevices} | ${ios ? ios[0] : ua.slice(0,40)}`);
-        setPhase('unsupported');
-        return;
-      }
-      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-        setPhase('error');
-        setErrMsg('Camera is not accessible here.\n\nIf using the home screen app, open in Safari browser instead.\n\nIn Safari: Settings → Privacy & Security → Camera → Allow.');
-        return;
-      }
-      let detector;
-      let scanTimer = null;
-      const preferred = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
-      const getFormats = typeof BarcodeDetector.getSupportedFormats === 'function'
-        ? BarcodeDetector.getSupportedFormats()
-        : Promise.resolve([]);
-      getFormats
-        .then(supported => {
-          const formats = preferred.filter(f => supported.includes(f));
-          try {
-            detector = formats.length ? new BarcodeDetector({ formats }) : new BarcodeDetector();
-          } catch(e) {
-            setPhase('unsupported');
-            return Promise.reject({ name: '_stop' });
-          }
-          return navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          });
-        })
-        .then(stream => {
-          if (!activeRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
-          streamRef.current = stream;
-          const video = videoRef.current;
-          if (!video) { stream.getTracks().forEach(t => t.stop()); return; }
-          video.srcObject = stream;
-          video.setAttribute('playsinline', '');
-          return video.play();
-        })
-        .then(() => {
-          if (!activeRef.current) return;
-          setPhase('scanning');
-          const video = videoRef.current;
-          const scan = async () => {
-            if (!activeRef.current || !video) return;
-            try {
-              const codes = await detector.detect(video);
-              if (codes.length > 0 && activeRef.current) {
-                stopCamera();
-                lookup(codes[0].rawValue);
-                return;
-              }
-            } catch(e) { /* frame not ready yet */ }
-            if (activeRef.current) scanTimer = setTimeout(scan, 250);
-          };
-          scanTimer = setTimeout(scan, 600);
-        })
-        .catch(err => {
-          if (!activeRef.current || err.name === '_stop') return;
+      if (hasNative) {
+        // ── Native BarcodeDetector path (Chrome/Chromium) ──────
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
           setPhase('error');
-          setErrMsg(err.name === 'NotAllowedError'
-            ? 'Camera access denied.\n\nGo to Settings → Privacy & Security → Camera → turn on for Safari, then tap Try Again.'
-            : `Camera unavailable (${err.name || 'unknown'}). Try opening the app in Safari browser.`
-          );
+          setErrMsg('Camera is not accessible. Try opening in a different browser.');
+          return;
+        }
+        let detector;
+        let scanTimer = null;
+        const preferred = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
+        const getFormats = typeof BarcodeDetector.getSupportedFormats === 'function'
+          ? BarcodeDetector.getSupportedFormats()
+          : Promise.resolve([]);
+        getFormats
+          .then(supported => {
+            const formats = preferred.filter(f => supported.includes(f));
+            try {
+              detector = formats.length ? new BarcodeDetector({ formats }) : new BarcodeDetector();
+            } catch(e) {
+              setPhase('unsupported');
+              return Promise.reject({ name: '_stop' });
+            }
+            return navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+          })
+          .then(stream => {
+            if (!activeRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+            streamRef.current = stream;
+            const video = videoRef.current;
+            if (!video) { stream.getTracks().forEach(t => t.stop()); return; }
+            video.srcObject = stream;
+            video.setAttribute('playsinline', '');
+            return video.play();
+          })
+          .then(() => {
+            if (!activeRef.current) return;
+            setPhase('scanning');
+            const video = videoRef.current;
+            const scan = async () => {
+              if (!activeRef.current || !video) return;
+              try {
+                const codes = await detector.detect(video);
+                if (codes.length > 0 && activeRef.current) {
+                  stopCamera();
+                  lookup(codes[0].rawValue);
+                  return;
+                }
+              } catch(e) { /* frame not ready yet */ }
+              if (activeRef.current) scanTimer = setTimeout(scan, 250);
+            };
+            scanTimer = setTimeout(scan, 600);
+          })
+          .catch(err => {
+            if (!activeRef.current || err.name === '_stop') return;
+            setPhase('error');
+            setErrMsg(err.name === 'NotAllowedError'
+              ? 'Camera access denied.\n\nSettings → Privacy & Security → Camera → turn on for Safari.'
+              : `Camera error (${err.name || 'unknown'}).`
+            );
+          });
+        return () => {
+          if (scanTimer) clearTimeout(scanTimer);
+          stopCamera();
+        };
+
+      } else {
+        // ── Quagga2 path (Safari / iOS) ────────────────────────
+        if (!window.Quagga) {
+          setPhase('error');
+          setErrMsg('Barcode scanner library failed to load.\n\nCheck your connection and reload the app.');
+          return;
+        }
+        const container = quaggaRef.current;
+        if (!container) return;
+        let stopped = false;
+        const stopQ = () => {
+          if (!stopped) { stopped = true; try { window.Quagga.stop(); } catch(e) {} }
+        };
+        window.Quagga.init({
+          inputStream: {
+            name: 'Live',
+            type: 'LiveStream',
+            target: container,
+            constraints: { facingMode: 'environment' }
+          },
+          locator: { patchSize: 'medium', halfSample: true },
+          numOfWorkers: 0,
+          decoder: {
+            readers: ['ean_reader','ean_8_reader','upc_reader','upc_e_reader','code_128_reader']
+          }
+        }, function(err) {
+          if (!activeRef.current) { stopQ(); return; }
+          if (err) {
+            const eName = err && err.name ? err.name : String(err);
+            setPhase('error');
+            setErrMsg(eName === 'NotAllowedError'
+              ? 'Camera access denied.\n\nSettings → Privacy & Security → Camera → turn on for Safari, then tap Try Again.'
+              : `Camera error: ${eName}. Try reloading the app.`
+            );
+            return;
+          }
+          window.Quagga.start();
+          setPhase('scanning');
+          // hide Quagga's debug canvas, keep only our frame overlay
+          const cv = container.querySelector('canvas.drawingBuffer');
+          if (cv) cv.style.display = 'none';
         });
-      return () => {
-        if (scanTimer) clearTimeout(scanTimer);
-        stopCamera();
-      };
+        window.Quagga.onDetected(function onDetect(result) {
+          if (!activeRef.current) return;
+          activeRef.current = false;
+          window.Quagga.offDetected(onDetect);
+          stopQ();
+          lookup(result.codeResult.code);
+        });
+        return () => {
+          activeRef.current = false;
+          stopQ();
+        };
+      }
     }, []);
 
     const handleAdd = () => {
@@ -950,11 +1005,16 @@ function App() {
     // ── Scanning view ───────────────────────────────────────
     if (phase === 'init' || phase === 'scanning') {
       return wrap(React.createElement(React.Fragment, null,
-        React.createElement('video', {
-          ref: videoRef,
-          style: { width: '100%', height: '100%', objectFit: 'cover' },
-          playsInline: true, muted: true, autoPlay: true
-        }),
+        hasNative
+          ? React.createElement('video', {
+              ref: videoRef,
+              style: { width: '100%', height: '100%', objectFit: 'cover' },
+              playsInline: true, muted: true, autoPlay: true
+            })
+          : React.createElement('div', {
+              ref: quaggaRef,
+              style: { width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }
+            }),
         React.createElement('div', {
           style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 1 }
         },
@@ -1047,9 +1107,6 @@ function App() {
       React.createElement('div', { style: { color: '#9090a0', fontSize: 14, lineHeight: 1.75, maxWidth: 300, whiteSpace: 'pre-line' } },
         phase === 'unsupported' ? unsupportedMsg : errMsg
       ),
-      phase === 'unsupported' && debugInfo && React.createElement('div', {
-        style: { color: '#55555f', fontSize: 10, fontFamily: 'monospace', maxWidth: 320, wordBreak: 'break-all', marginTop: 4 }
-      }, debugInfo),
       phase !== 'unsupported' && React.createElement('button', { className: 'btn ghost', onClick: onRescan }, 'Try Again'),
       React.createElement('button', { className: 'btn', onClick: onClose }, 'Enter Manually')
     ));
