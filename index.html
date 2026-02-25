@@ -845,6 +845,19 @@ function App() {
             const servingQty = f.servingSize || 100;
             const unit = (f.servingSizeUnit || 'g').toLowerCase();
             // USDA FDC branded nutrients are per 100g
+            // Capture micros silently (per 100g); vitD in mcg→IU (×40), omega3 EPA(1278)+DHA(1272) g→mg (×1000)
+            const micros100 = {
+              fiber:     +((nmap[1079] || 0).toFixed(1)),
+              vitD:      Math.round((nmap[1114] || 0) * 40),
+              vitK:      +((nmap[1185] || 0).toFixed(1)),
+              omega3:    Math.round(((nmap[1278] || 0) + (nmap[1272] || 0)) * 1000),
+              magnesium: Math.round(nmap[1090] || 0),
+              calcium:   Math.round(nmap[1087] || 0),
+              zinc:      +((nmap[1095] || 0).toFixed(1)),
+              b12:       +((nmap[1178] || 0).toFixed(2)),
+              vitC:      Math.round(nmap[1162] || 0),
+              potassium: Math.round(nmap[1092] || 0),
+            };
             return setFound({
               name: (f.description || 'Scanned Product').split(',')[0].trim(),
               cals100: Math.round(nmap[1008] || nmap[1062] || 0),
@@ -853,6 +866,7 @@ function App() {
               fat100: +((nmap[1004] || 0).toFixed(1)),
               servingSize: `${servingQty}${unit}`,
               servingQty: unit === 'g' ? servingQty : 100,
+              micros100,
               barcode, source: 'USDA',
             });
           }
@@ -991,12 +1005,23 @@ function App() {
       const g = parseFloat(grams) || 100;
       const scale = g / 100;
       const r1 = v => Math.round(v * 10) / 10;
+      // Scale food micros by actual serving size
+      let micros = {};
+      if (food.micros100) {
+        Object.entries(food.micros100).forEach(([key, val]) => {
+          const scaled = val * scale;
+          micros[key] = key === 'fiber' || key === 'b12' || key === 'zinc' || key === 'vitK'
+            ? +scaled.toFixed(key === 'b12' ? 2 : 1)
+            : Math.round(scaled);
+        });
+      }
       onAdd({
         name: `${food.name} (${g}g)`,
         cals: Math.round(food.cals100 * scale),
         protein: r1(food.protein100 * scale),
         carbs: r1(food.carbs100 * scale),
         fat: r1(food.fat100 * scale),
+        micros,
       });
       // Save raw per-100g data to My Foods for future quick-add
       if (onSave) onSave({
@@ -1198,10 +1223,13 @@ function App() {
           },
           body: JSON.stringify({
             model: 'claude-haiku-4-5-20251001',
-            max_tokens: 300,
+            max_tokens: 600,
             messages: [{ role: 'user', content: [
               { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-              { type: 'text', text: 'This is a Nutrition Facts or Supplement Facts label. Extract the data and return ONLY a JSON object, no other text: {"name":"product name","serving_g":30,"cals100":120,"protein100":25,"carbs100":5,"fat100":2} where cals100/protein100/carbs100/fat100 are per 100g (convert from per-serving values using the serving size). For capsules/softgels/tablets use serving_g=1.' }
+              { type: 'text', text: mode === 'supp'
+                ? 'This is a Supplement Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":1,"cals100":0,"protein100":0,"carbs100":0,"fat100":0,"micros_per_serving":{"fiber":0,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":0,"potassium":0}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using the serving size). For capsules/softgels/tablets use serving_g=1. micros_per_serving units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA in mg, magnesium/calcium/zinc/vitC/potassium=mg, b12=mcg. Use 0 for any not listed.'
+                : 'This is a Nutrition Facts or Supplement Facts label. Extract the data and return ONLY a JSON object, no other text: {"name":"product name","serving_g":30,"cals100":120,"protein100":25,"carbs100":5,"fat100":2} where cals100/protein100/carbs100/fat100 are per 100g (convert from per-serving values using the serving size). For capsules/softgels/tablets use serving_g=1.'
+              }
             ]}],
           }),
         });
@@ -1211,7 +1239,8 @@ function App() {
         const match = text.match(/\{[\s\S]*?\}/);
         if (!match) throw new Error('No structured data found in label');
         const parsed = JSON.parse(match[0]);
-        if (parsed.cals100 == null) throw new Error('Could not read nutrition values');
+        if (parsed.cals100 == null && !parsed.name) throw new Error('Could not read nutrition values');
+        if (parsed.cals100 == null) parsed.cals100 = 0;
         setResult(parsed);
         setPhase('done');
       } catch(err) {
@@ -1276,12 +1305,28 @@ function App() {
             React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 28, color: s.c, lineHeight: 1 } }, s.v),
             React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', marginTop: 2 } }, s.l)
           ))
-        )
+        ),
+        // Show detected micros for supplement mode
+        mode === 'supp' && r.micros_per_serving && (() => {
+          const detectedMicros = Object.entries(r.micros_per_serving).filter(([,v]) => v > 0);
+          if (!detectedMicros.length) return null;
+          return React.createElement('div', { style: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' } },
+            React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase', marginBottom: 6 } }, 'Micronutrients detected'),
+            React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+              ...detectedMicros.map(([key, val]) => {
+                const m = (typeof MICROS_META !== 'undefined' ? MICROS_META : []).find(x => x.key === key);
+                return React.createElement('span', { key, style: { fontSize: 11, background: 'rgba(255,255,255,.07)', borderRadius: 6, padding: '3px 8px', color: m ? m.color : 'var(--t2)' } },
+                  `${m ? m.label : key} ${val}${m ? m.unit : ''}`
+                );
+              })
+            )
+          );
+        })()
       ),
       React.createElement('div', { style: { display: 'flex', gap: 10 } },
         React.createElement('button', { className: 'btn ghost', onClick: reset }, 'Retake'),
         React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center' },
-          onClick: () => onResult({ name: r.name || 'Scanned Product', cals100: r.cals100||0, protein100: r.protein100||0, carbs100: r.carbs100||0, fat100: r.fat100||0, defaultGrams: g, barcode: null })
+          onClick: () => onResult({ name: r.name || 'Scanned Product', cals100: r.cals100||0, protein100: r.protein100||0, carbs100: r.carbs100||0, fat100: r.fat100||0, defaultGrams: g, barcode: null, micros: r.micros_per_serving || {} })
         }, mode === 'supp' ? '+ Add to Stack' : '+ Add to Log')
       )
     ));
@@ -1298,15 +1343,29 @@ function App() {
   const _getSupps = () => { try { return JSON.parse(localStorage.getItem(SUPPS_KEY) || '[]'); } catch(e) { return []; } };
   const _saveSupps = (arr) => { try { localStorage.setItem(SUPPS_KEY, JSON.stringify(arr)); } catch(e) {} };
 
+  // Micronutrient targets for 56yo male (DRI/RDA). Units: fiber=g, vitD=IU, vitK=mcg, omega3/mag/calcium/zinc/vitC/potassium=mg, b12=mcg
+  const MICROS_META = [
+    { key: 'fiber',     label: 'Fiber',       unit: 'g',   rda: 30,   color: '#fb923c' },
+    { key: 'vitD',      label: 'Vitamin D',   unit: 'IU',  rda: 600,  color: '#fcd34d' },
+    { key: 'vitK',      label: 'Vitamin K',   unit: 'mcg', rda: 120,  color: '#86efac' },
+    { key: 'omega3',    label: 'Omega-3',     unit: 'mg',  rda: 1600, color: '#60a5fa' },
+    { key: 'magnesium', label: 'Magnesium',   unit: 'mg',  rda: 420,  color: '#c4b5fd' },
+    { key: 'calcium',   label: 'Calcium',     unit: 'mg',  rda: 1000, color: '#f9a8d4' },
+    { key: 'zinc',      label: 'Zinc',        unit: 'mg',  rda: 11,   color: '#67e8f9' },
+    { key: 'b12',       label: 'Vitamin B12', unit: 'mcg', rda: 2.4,  color: '#6ee7b7' },
+    { key: 'vitC',      label: 'Vitamin C',   unit: 'mg',  rda: 90,   color: '#c8f135' },
+    { key: 'potassium', label: 'Potassium',   unit: 'mg',  rda: 3400, color: '#fda4af' },
+  ];
+
   const RECOMMENDED_SUPPS = [
-    { id: 'rec_creatine', name: 'Creatine Monohydrate', isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 5,   defaultUnit: 'g',    timing: 'anytime',      note: 'Muscle preservation, strength, cognitive health. Most researched supplement. 5g/day.' },
-    { id: 'rec_d3k2',     name: 'Vitamin D3 + K2',      isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'cap',  timing: 'morning',      note: 'Critical for testosterone, bone density, immune function. Most desk workers are deficient.' },
-    { id: 'rec_omega3',   name: 'Omega-3 (EPA+DHA)',     isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 3,   defaultUnit: 'g',    timing: 'morning',      note: '2–3g EPA+DHA daily. Anti-inflammatory, joint health, cardiovascular.' },
-    { id: 'rec_mag',      name: 'Magnesium Glycinate',   isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 400, defaultUnit: 'mg',   timing: 'bedtime',      note: '300–400mg before bed. Sleep quality, muscle recovery, glucose metabolism.' },
-    { id: 'rec_collagen', name: 'Collagen Peptides',     isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 15,  defaultUnit: 'g',    timing: 'pre-workout',  note: 'Take with Vit C 30 min before training. Tendon & joint health — key for hip tightness.' },
-    { id: 'rec_nad',      name: 'NAD+ (NMN/NR)',         isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'cap',  timing: 'morning',      note: 'Mitochondrial energy, cellular repair. Peter Attia longevity protocol.' },
-    { id: 'rec_fiber',    name: 'Fiber Supplement',      isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'srv',  timing: 'morning',      note: 'Digestive health, satiety during fat loss. Aim 25–35g total fiber/day.' },
-    { id: 'rec_whey',     name: 'Whey Protein',          isMacro: true,  cals100: 370, protein100: 80, carbs100: 8, fat100: 4, defaultGrams: 30, defaultUnit: 'g',  timing: 'post-workout', note: 'Safety net for hitting 175g/day protein. ~25g protein per 30g scoop.' },
+    { id: 'rec_creatine', name: 'Creatine Monohydrate', isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 5,   defaultUnit: 'g',    timing: 'anytime',      micros: {},                                              note: 'Muscle preservation, strength, cognitive health. Most researched supplement. 5g/day.' },
+    { id: 'rec_d3k2',     name: 'Vitamin D3 + K2',      isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'cap',  timing: 'morning',      micros: { vitD: 2000, vitK: 100 },                       note: 'Critical for testosterone, bone density, immune function. Most desk workers are deficient.' },
+    { id: 'rec_omega3',   name: 'Omega-3 (EPA+DHA)',     isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 3,   defaultUnit: 'g',    timing: 'morning',      micros: { omega3: 2000 },                                note: '2–3g EPA+DHA daily. Anti-inflammatory, joint health, cardiovascular.' },
+    { id: 'rec_mag',      name: 'Magnesium Glycinate',   isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 400, defaultUnit: 'mg',   timing: 'bedtime',      micros: { magnesium: 400 },                              note: '300–400mg before bed. Sleep quality, muscle recovery, glucose metabolism.' },
+    { id: 'rec_collagen', name: 'Collagen Peptides',     isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 15,  defaultUnit: 'g',    timing: 'pre-workout',  micros: {},                                              note: 'Take with Vit C 30 min before training. Tendon & joint health — key for hip tightness.' },
+    { id: 'rec_nad',      name: 'NAD+ (NMN/NR)',         isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'cap',  timing: 'morning',      micros: {},                                              note: 'Mitochondrial energy, cellular repair. Peter Attia longevity protocol.' },
+    { id: 'rec_fiber',    name: 'Fiber Supplement',      isMacro: false, cals100: 0, protein100: 0, carbs100: 0, fat100: 0, defaultGrams: 1,   defaultUnit: 'srv',  timing: 'morning',      micros: { fiber: 5 },                                    note: 'Digestive health, satiety during fat loss. Aim 25–35g total fiber/day.' },
+    { id: 'rec_whey',     name: 'Whey Protein',          isMacro: true,  cals100: 370, protein100: 80, carbs100: 8, fat100: 4, defaultGrams: 30, defaultUnit: 'g',  timing: 'post-workout', micros: {},                                              note: 'Safety net for hitting 175g/day protein. ~25g protein per 30g scoop.' },
   ];
 
   function NutritionTab({ nutrition, setNutrition }) {
@@ -1387,18 +1446,34 @@ function App() {
           }],
         };
       }
+      // Micronutrients: add on check, subtract on uncheck
+      if (supp.micros && Object.keys(supp.micros).length > 0) {
+        const cur = { ...(u.micros || {}) };
+        Object.entries(supp.micros).forEach(([key, val]) => {
+          if (val > 0) cur[key] = Math.max(0, (cur[key] || 0) + (checked ? -val : val));
+        });
+        u = { ...u, micros: cur };
+      }
       const nn = [u, ...nutrition.filter(n => n.date !== today)];
       setNutrition(nn);
       await sset('nutrition', nn);
     };
 
     const add = async (food) => {
+      // Merge micronutrients from food into daily totals
+      let mergedMicros = { ...(tl.micros || {}) };
+      if (food.micros) {
+        Object.entries(food.micros).forEach(([key, val]) => {
+          if (val > 0) mergedMicros[key] = +((( mergedMicros[key] || 0) + val).toFixed(2));
+        });
+      }
       const u = {
         ...tl,
         cals:    Math.round(tl.cals    + (+(food.cals    || 0))),
         protein: Math.round((tl.protein + (+(food.protein || 0))) * 10) / 10,
         fat:     Math.round((tl.fat     + (+(food.fat     || 0))) * 10) / 10,
         carbs:   Math.round((tl.carbs   + (+(food.carbs   || 0))) * 10) / 10,
+        micros: mergedMicros,
         items: [...(tl.items || []), { name: food.name, cals: +(food.cals||0), protein: +(food.protein||0), carbs: +(food.carbs||0), fat: +(food.fat||0) }],
       };
       const nn = [u, ...nutrition.filter(n => n.date !== today)];
@@ -1525,7 +1600,7 @@ function App() {
         onResult: (raw) => {
           setShowLabelScanner(false);
           if (labelScanMode === 'supp') {
-            setSuppConfig({ name: raw.name, isMacro: raw.cals100 > 10, timing: 'anytime', cals100: raw.cals100, protein100: raw.protein100, carbs100: raw.carbs100, fat100: raw.fat100, defaultGrams: raw.defaultGrams, defaultUnit: 'g' });
+            setSuppConfig({ name: raw.name, isMacro: raw.cals100 > 10, timing: 'anytime', cals100: raw.cals100, protein100: raw.protein100, carbs100: raw.carbs100, fat100: raw.fat100, defaultGrams: raw.defaultGrams, defaultUnit: 'g', micros: raw.micros || {} });
             setView('supps');
           } else {
             saveToMyFoods(raw);
@@ -1633,6 +1708,27 @@ function App() {
           React.createElement('br'),
           `At 56, ${USER.protein}g protein daily preserves muscle during fat loss. Aim 40–50g per meal, 3–4 meals.`
         )
+      ),
+
+      // ── Micronutrients card ───────────────────────────────────
+      React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
+          React.createElement('div', { className: 'clbl', style: { margin: 0 } }, 'Micronutrients'),
+          React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase' } }, 'from supps + food')
+        ),
+        ...MICROS_META.map(m => {
+          const val = (tl.micros || {})[m.key] || 0;
+          const pct = Math.min(val / m.rda * 100, 100);
+          const dispVal = m.unit === 'g' ? val.toFixed(1) : m.unit === 'mcg' && m.rda < 10 ? val.toFixed(2) : Math.round(val);
+          const dispRda = m.unit === 'g' ? m.rda.toFixed(0) : m.rda;
+          return React.createElement('div', { key: m.key, className: 'mr', style: { marginBottom: 6 } },
+            React.createElement('span', { className: 'mn', style: { color: pct >= 100 ? m.color : 'var(--t2)' } }, m.label),
+            React.createElement('div', { className: 'mb' },
+              React.createElement('div', { className: 'mf', style: { width: `${pct}%`, background: m.color, opacity: pct >= 100 ? 1 : 0.75 } })
+            ),
+            React.createElement('span', { className: 'mv', style: { fontSize: 11 } }, `${dispVal}/${dispRda}${m.unit}`)
+          );
+        })
       ),
 
       // ── Log Food view ────────────────────────────────────────
@@ -1871,7 +1967,7 @@ function App() {
             className: 'btn ghost',
             style: { width: '100%', justifyContent: 'center', fontSize: 13, marginTop: 8, borderColor: 'var(--blue)', color: 'var(--blue)' },
             onClick: () => { setLabelScanMode('supp'); setShowLabelScanner(true); }
-          }, '📸 Scan Supplement Label  ·  Claude reads any label')
+          }, '📸 Scan Label')
         ),
 
         // Recommended card
