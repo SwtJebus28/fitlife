@@ -839,13 +839,26 @@ function App() {
         setPhase('unsupported');
         return;
       }
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+        setPhase('error');
+        setErrMsg('Camera is not accessible here.\n\nIf using the home screen app, open in Safari browser instead.\n\nIn Safari: Settings → Privacy & Security → Camera → Allow.');
+        return;
+      }
       let detector;
       let scanTimer = null;
       const preferred = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'];
-      BarcodeDetector.getSupportedFormats()
+      const getFormats = typeof BarcodeDetector.getSupportedFormats === 'function'
+        ? BarcodeDetector.getSupportedFormats()
+        : Promise.resolve([]);
+      getFormats
         .then(supported => {
           const formats = preferred.filter(f => supported.includes(f));
-          detector = formats.length ? new BarcodeDetector({ formats }) : new BarcodeDetector();
+          try {
+            detector = formats.length ? new BarcodeDetector({ formats }) : new BarcodeDetector();
+          } catch(e) {
+            setPhase('unsupported');
+            return Promise.reject({ name: '_stop' });
+          }
           return navigator.mediaDevices.getUserMedia({
             video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
           });
@@ -878,16 +891,12 @@ function App() {
           scanTimer = setTimeout(scan, 600);
         })
         .catch(err => {
-          if (!activeRef.current) return;
-          if (err.name === 'NotSupportedError' || err.name === 'TypeError') {
-            setPhase('unsupported');
-          } else {
-            setPhase('error');
-            setErrMsg(err.name === 'NotAllowedError'
-              ? 'Camera access denied.\n\nGo to Settings → Safari → Camera and allow access, then try again.'
-              : 'Camera is not available on this device.'
-            );
-          }
+          if (!activeRef.current || err.name === '_stop') return;
+          setPhase('error');
+          setErrMsg(err.name === 'NotAllowedError'
+            ? 'Camera access denied.\n\nGo to Settings → Privacy & Security → Camera → turn on for Safari, then tap Try Again.'
+            : `Camera unavailable (${err.name || 'unknown'}). Try opening the app in Safari browser.`
+          );
         });
       return () => {
         if (scanTimer) clearTimeout(scanTimer);
@@ -1026,7 +1035,7 @@ function App() {
 
     // ── Not found / error / unsupported view ────────────────
     const iconMap = { notfound: '🔍', error: '⚠️', unsupported: '📷' };
-    const unsupportedMsg = 'Barcode scanning is not available here.\n\nIf using the home screen app, try opening in Safari instead. Or use Quick Add / Custom Entry.';
+    const unsupportedMsg = 'Barcode scanning requires iOS 17+ with Safari.\n\nUpdate your iOS or use Quick Add / Custom Entry.';
     return wrap(React.createElement('div', {
       style: { flex: 1, background: '#090909', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 28, gap: 16, textAlign: 'center' }
     },
