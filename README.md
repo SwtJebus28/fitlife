@@ -48,6 +48,16 @@ All entries link directly to YouTube demos or source content.
 ### 🤖 AI Coach
 Powered by Claude (Anthropic). The coach knows your full profile, exercise library, workout history, working weights, and all 5 cardio protocols. Ask it anything about programming, progression, mobility, or nutrition.
 
+### 📷 Barcode Scanner *(Sprint 1)*
+Camera-based food barcode scanning built into the Fuel tab:
+- Tap **Scan Food Barcode** in Log Food to open the live camera viewfinder
+- Point at any packaged food barcode — auto-detects EAN-13, UPC-A, UPC-E, Code 128, and more
+- Nutrition data (calories, protein, carbs, fat) auto-fills from [Open Food Facts](https://world.openfoodfacts.org/) — free, no API key required
+- Adjust serving size in grams — scaled nutrition updates in real time
+- One tap to add to your daily log
+- Falls back gracefully if barcode is not in the database or camera is unavailable
+- Uses native `BarcodeDetector` API (iOS 17+ / Chrome 83+) — no external library, no extra load time
+
 ---
 
 ## Installation on iPhone
@@ -97,7 +107,7 @@ The app is written in JSX (`fitness-app.jsx`) and compiled to vanilla JS before 
 
 ## Roadmap
 
-- [ ] **Barcode scanner** — camera-based food barcode scanning with Open Food Facts API lookup
+- [x] **Barcode scanner** — camera-based food barcode scanning with Open Food Facts API lookup *(Sprint 1)*
 - [ ] **Mindfulness tab** — box breathing, 4-7-8, physiological sigh (animated guides), meditation timer
 - [ ] **Fitbit integration** — pull steps, sleep score, and resting HR via Fitbit Web API (OAuth)
 - [ ] Body weight / measurements tracker
