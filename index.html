@@ -789,6 +789,7 @@ function App() {
     const [food, setFood] = React.useState(null);
     const [grams, setGrams] = React.useState('100');
     const [errMsg, setErrMsg] = React.useState('');
+    const [debugInfo, setDebugInfo] = React.useState('');
     const videoRef = React.useRef(null);
     const streamRef = React.useRef(null);
     const activeRef = React.useRef(true);
@@ -836,6 +837,9 @@ function App() {
 
     React.useEffect(() => {
       if (!('BarcodeDetector' in window)) {
+        const ua = navigator.userAgent || '';
+        const ios = ua.match(/OS [\d_]+/);
+        setDebugInfo(`BD:${typeof window.BarcodeDetector} | MD:${!!navigator.mediaDevices} | ${ios ? ios[0] : ua.slice(0,40)}`);
         setPhase('unsupported');
         return;
       }
@@ -1043,6 +1047,9 @@ function App() {
       React.createElement('div', { style: { color: '#9090a0', fontSize: 14, lineHeight: 1.75, maxWidth: 300, whiteSpace: 'pre-line' } },
         phase === 'unsupported' ? unsupportedMsg : errMsg
       ),
+      phase === 'unsupported' && debugInfo && React.createElement('div', {
+        style: { color: '#55555f', fontSize: 10, fontFamily: 'monospace', maxWidth: 320, wordBreak: 'break-all', marginTop: 4 }
+      }, debugInfo),
       phase !== 'unsupported' && React.createElement('button', { className: 'btn ghost', onClick: onRescan }, 'Try Again'),
       React.createElement('button', { className: 'btn', onClick: onClose }, 'Enter Manually')
     ));
