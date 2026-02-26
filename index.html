@@ -1818,7 +1818,7 @@ function App() {
           React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
           React.createElement('div', { className: 'ig', style: { position: 'relative' } },
             React.createElement('label', { className: 'ilbl' }, 'Food Name'),
-            React.createElement('input', { className: 'inp', placeholder: 'e.g. Coffee, Chicken breast', value: c.name, onChange: e => handleNameChange(e.target.value) }),
+            React.createElement('input', { className: 'inp', placeholder: 'e.g. Coffee, Chicken breast', value: c.name, onChange: e => handleNameChange(e.target.value), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false }),
             searching && React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 4 } }, 'Searching...'),
             suggestions.length > 0 && React.createElement('div', {
               style: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, overflow: 'hidden', marginTop: 2 }
