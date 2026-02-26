@@ -1536,18 +1536,34 @@ function App() {
       if (!query || query.length < 2) { setSuggestions([]); return; }
       setSearching(true);
       try {
-        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&action=process&json=1&page_size=6&fields=product_name,nutriments`;
-        const res = await fetch(url);
-        const data = await res.json();
-        const items = (data.products || [])
-          .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'] != null)
-          .map(p => ({
-            name: p.product_name,
-            cals100: Math.round(p.nutriments['energy-kcal_100g'] || 0),
-            protein100: Math.round((p.nutriments['proteins_100g'] || 0) * 10) / 10,
-            carbs100: Math.round((p.nutriments['carbohydrates_100g'] || 0) * 10) / 10,
-            fat100: Math.round((p.nutriments['fat_100g'] || 0) * 10) / 10,
-          }));
+        // Run USDA Foundation/SR Legacy (whole foods) and OFN (packaged) in parallel
+        const [usdaRes, ofnRes] = await Promise.allSettled([
+          fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy&pageSize=6`),
+          fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&action=process&json=1&page_size=6&fields=product_name,nutriments`),
+        ]);
+        let items = [];
+        // USDA first — authoritative for whole foods (apple, chicken, cheese, roast beef, etc.)
+        if (usdaRes.status === 'fulfilled' && usdaRes.value.ok) {
+          const data = await usdaRes.value.json();
+          const parsed = (data.foods || []).map(f => {
+            const nmap = {};
+            (f.foodNutrients || []).forEach(n => { nmap[n.nutrientId] = n.value; });
+            const parts = (f.description || '').split(',');
+            // "Apples, raw, with skin" → "Apples (raw)" | "Cheese, cheddar" → "Cheese (cheddar)"
+            const name = parts[0].trim().replace(/\b\w/g, l => l.toUpperCase()) +
+              (parts[1] ? ` (${parts[1].trim().toLowerCase()})` : '');
+            return { name, cals100: Math.round(nmap[1008] || nmap[1062] || 0), protein100: +((nmap[1003]||0).toFixed(1)), carbs100: +((nmap[1005]||0).toFixed(1)), fat100: +((nmap[1004]||0).toFixed(1)) };
+          }).filter(f => f.cals100 > 0 || f.protein100 > 0);
+          items.push(...parsed.slice(0, 4));
+        }
+        // OFN fills remaining slots — good for packaged/branded foods
+        if (ofnRes.status === 'fulfilled' && ofnRes.value.ok && items.length < 5) {
+          const data = await ofnRes.value.json();
+          const parsed = (data.products || [])
+            .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'] != null)
+            .map(p => ({ name: p.product_name, cals100: Math.round(p.nutriments['energy-kcal_100g']||0), protein100: +((p.nutriments['proteins_100g']||0).toFixed(1)), carbs100: +((p.nutriments['carbohydrates_100g']||0).toFixed(1)), fat100: +((p.nutriments['fat_100g']||0).toFixed(1)) }));
+          items.push(...parsed.slice(0, 5 - items.length));
+        }
         setSuggestions(items.slice(0, 5));
       } catch(e) {
         setSuggestions([]);
@@ -1764,7 +1780,7 @@ function App() {
             className: 'btn ghost',
             style: { width: '100%', justifyContent: 'center', gap: 8, marginTop: 8, fontSize: 14, borderColor: 'var(--blue)', color: 'var(--blue)' },
             onClick: () => { setLabelScanMode('food'); setShowLabelScanner(true); }
-          }, '📸 Scan Nutrition Label  ·  Claude reads any label')
+          }, '📸 Scan Label')
         ),
         // My Foods card — only shown after first scan save
         myFoods.length > 0 && React.createElement('div', { className: 'card' },
