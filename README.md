@@ -44,6 +44,7 @@ All entries link directly to YouTube demos or source content.
 
 **Today tab**
 - Calorie ring + macro progress bars (protein / carbs / fat) with daily totals
+- **Micronutrient tracker** — 10 color-coded progress bars (Fiber, Vit D, Vit K, Omega-3, Magnesium, Calcium, Zinc, B12, Vit C, Potassium) vs age-appropriate RDAs; fed silently by food scans and supplement check-ins
 
 **Log Food tab**
 - **Barcode Scanner** — live camera viewfinder scans EAN-13, UPC-A, UPC-E, Code 128 and more; auto-looks up Open Food Facts → USDA FoodData Central fallback; scanned foods save to *My Foods* for one-tap re-add
@@ -57,11 +58,10 @@ All entries link directly to YouTube demos or source content.
   - Timing color codes: amber=morning, lime=pre-workout, blue=post-workout, purple=bedtime
 - Add supplements by barcode scan, label photo (Claude Vision), or manual entry
 - **Recommended for 56yo male**: Creatine, D3+K2, Omega-3, Magnesium, Collagen Peptides, NAD+, Fiber, Whey Protein — hides items already in your stack
-- **Micronutrient tracker** — 10 color-coded progress bars vs age-appropriate RDA targets, fed by both supplement check-ins and food barcode scans:
-  Fiber · Vitamin D · Vitamin K · Omega-3 · Magnesium · Calcium · Zinc · B12 · Vitamin C · Potassium
 
 **Targets tab**
 - TDEE, daily calorie target, and macro breakdown calculated for your profile
+- **Micronutrient Targets** — stat-grid showing all 10 RDA values in accent colors
 
 ### 🤖 AI Coach
 Powered by Claude (Anthropic). The coach knows your full profile, exercise library, workout history, working weights, and all 5 cardio protocols. Requires an Anthropic API key stored locally — never committed to the repo.
@@ -112,7 +112,7 @@ New features are implemented directly in `index.html` as additional `<script>` b
 - [x] **Supplements tab** — My Stack checklist, macro FUEL tracking, Recommended stack *(Sprint 2)*
 - [x] **Claude Vision label scanning** — photo any nutrition/supplement label to extract macros *(Sprint 3)*
 - [x] **Micronutrient tracking** — 10 nutrients with age-appropriate RDAs, fed by supps + food scans *(Sprint 4)*
-- [ ] **Cross-device sync** — Supabase (or GitHub Gist) so iPhone and iPad share the same data *(Sprint 3 in backlog)*
+- [x] **Cross-device sync** — GitHub Gist private sync; auto-push on every write, pull on load *(Sprint 3b)*
 - [ ] **Mindfulness tab** — box breathing, 4-7-8, physiological sigh (animated guides), meditation timer *(Sprint 5)*
 - [ ] **Fitbit integration** — steps, sleep score, resting HR via Fitbit Web API OAuth *(Sprint 6)*
 - [ ] **Body metrics tracker** — weight trend graph, measurements, progress photos *(Sprint 7)*
