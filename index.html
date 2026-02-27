@@ -2121,6 +2121,41 @@ function App() {
     const [keyDraft, setKeyDraft] = React.useState('');
     const [editingKey, setEditingKey] = React.useState(false);
 
+    // ── Sync state ────────────────────────────────────────────
+    const [syncToken, setSyncToken]   = React.useState(localStorage.getItem('fitlife_github_token') || '');
+    const [syncDraft, setSyncDraft]   = React.useState('');
+    const [syncStatus, setSyncStatus] = React.useState(window._FitSync ? window._FitSync.getStatus() : 'idle');
+    const [syncAt, setSyncAt]         = React.useState(localStorage.getItem('fitlife_sync_at'));
+    const [syncEdit, setSyncEdit]     = React.useState(false);
+
+    React.useEffect(() => {
+      if (!window._FitSync) return;
+      window._FitSync.onStatus(s => {
+        setSyncStatus(s);
+        setSyncAt(localStorage.getItem('fitlife_sync_at'));
+      });
+    }, []);
+
+    function _fmtSyncAt(ts) {
+      if (!ts) return null;
+      const mins = Math.round((Date.now() - parseInt(ts)) / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins} min ago`;
+      return `${Math.floor(mins / 60)}h ago`;
+    }
+    function _doSyncPush() { if (window._FitSync) window._FitSync.push(); }
+    function _saveToken() {
+      const t = syncDraft.trim();
+      if (!t) return;
+      localStorage.setItem('fitlife_github_token', t);
+      setSyncToken(t); setSyncDraft(''); setSyncEdit(false);
+      if (window._FitSync) window._FitSync.push();
+    }
+    function _clearSync() {
+      ['fitlife_github_token','fitlife_gist_id','fitlife_sync_at'].forEach(k => localStorage.removeItem(k));
+      setSyncToken(''); setSyncAt(null); setSyncEdit(false);
+    }
+
     const SUGG = [
       "How do I progress dead hangs to pull-ups?",
       "Best hip mobility routine for desk workers?",
@@ -2282,32 +2317,207 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
           onKeyDown: e => e.key === 'Enter' && send()
         }),
         React.createElement('button', { className: 'btn', onClick: () => send(), disabled: loading || !input.trim() }, 'Send')
+      ),
+
+      // ── Sync settings card ────────────────────────────────────
+      React.createElement('div', { className: 'card', style: { margin: '10px 16px 90px' } },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+          React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '🔄 Sync'),
+          syncToken && !syncEdit
+            ? React.createElement('span', { style: { fontSize: 11, color: syncStatus === 'ok' ? 'var(--lime)' : syncStatus === 'error' ? 'var(--red)' : syncStatus === 'syncing' ? 'var(--blue)' : 'var(--t3)' } },
+                syncStatus === 'syncing' ? 'Syncing…' : syncStatus === 'error' ? '⚠ Error' : syncAt ? `✓ ${_fmtSyncAt(syncAt)}` : 'Not synced'
+              )
+            : null
+        ),
+        (!syncToken || syncEdit)
+          ? React.createElement(React.Fragment, null,
+              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', lineHeight: 1.55, marginBottom: 10 } },
+                'Share data across iPhone + iPad via a private GitHub Gist. Create a free token with ',
+                React.createElement('strong', null, 'gist'),
+                ' scope at ',
+                React.createElement('a', { href: 'https://github.com/settings/tokens/new?description=FitLife+Sync&scopes=gist', target: '_blank', style: { color: 'var(--blue)' } }, 'github.com/settings/tokens'),
+                ', then paste it below.'
+              ),
+              React.createElement('div', { className: 'ig' },
+                React.createElement('label', { className: 'ilbl' }, 'GitHub Personal Access Token (classic)'),
+                React.createElement('input', { className: 'inp', type: 'password', placeholder: 'ghp_…', value: syncDraft, onChange: e => setSyncDraft(e.target.value) })
+              ),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+                syncEdit && React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => { setSyncEdit(false); setSyncDraft(''); } }, 'Cancel'),
+                React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center', fontSize: 13 }, disabled: !syncDraft.trim().startsWith('ghp_'), onClick: _saveToken }, 'Save & Sync')
+              )
+            )
+          : React.createElement(React.Fragment, null,
+              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', marginBottom: 10 } },
+                'iPhone + iPad share the same workout history, nutrition logs, and supplement stack. Auto-syncs after every change.'
+              ),
+              React.createElement('div', { style: { display: 'flex', gap: 8 } },
+                React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center', fontSize: 13 }, disabled: syncStatus === 'syncing', onClick: _doSyncPush },
+                  syncStatus === 'syncing' ? 'Syncing…' : '🔄 Sync Now'
+                ),
+                React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, title: 'Update token', onClick: () => { setSyncEdit(true); setSyncDraft(''); } }, '🔑'),
+                React.createElement('button', { className: 'btn ghost', style: { fontSize: 13, color: 'var(--t3)' }, title: 'Disconnect sync', onClick: _clearSync }, '✕')
+              )
+            )
       )
     );
   }
   </script>
 
   <script>
-    // Mount the app
-    try {
-      const container = document.getElementById('root');
-      const root = ReactDOM.createRoot(container);
-      root.render(React.createElement(App));
-      // Hide boot screen after render
-      requestAnimationFrame(function() {
-        requestAnimationFrame(function() {
-          var boot = document.getElementById('boot');
-          if (boot) {
-            boot.style.opacity = '0';
-            setTimeout(function() { if(boot.parentNode) boot.remove(); }, 400);
-          }
-        });
+  // ============================================================
+  // Sprint 3 — GitHub Gist Cross-Device Sync
+  // ============================================================
+  window._FitSync = (function() {
+    const TOKEN_KEY = 'fitlife_github_token';
+    const GIST_KEY  = 'fitlife_gist_id';
+    const SYNC_AT   = 'fitlife_sync_at';
+    const GIST_FILE = 'fitlife_data.json';
+    const SYNC_KEYS = ['history','weights','nutrition','fitlife_my_foods','fitlife_supps'];
+
+    // Save original setItem before monkey-patching
+    const _origSet = localStorage.setItem.bind(localStorage);
+    function _rawSet(k, v) { _origSet(k, v); }
+
+    function _bundle() {
+      const b = { _syncedAt: Date.now() };
+      SYNC_KEYS.forEach(k => {
+        try { b[k] = JSON.parse(localStorage.getItem(k) || 'null'); } catch(e) {}
       });
-    } catch(e) {
-      document.getElementById('boot').style.display = 'none';
-      document.getElementById('err').style.display = 'block';
-      document.getElementById('errmsg').textContent = e.stack || e.message;
+      return b;
     }
+
+    function _applyBundle(b) {
+      SYNC_KEYS.forEach(k => { if (b[k] != null) _rawSet(k, JSON.stringify(b[k])); });
+      if (b._gistId) _rawSet(GIST_KEY, b._gistId);
+      _rawSet(SYNC_AT, String(b._syncedAt || Date.now()));
+    }
+
+    // Status / subscriber callbacks
+    let _status = 'idle';
+    const _cbs = [];
+    function _setStatus(s) { _status = s; _cbs.forEach(f => f(s)); }
+
+    function _headers() {
+      return {
+        'Authorization': `token ${localStorage.getItem(TOKEN_KEY)}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      };
+    }
+
+    // Find existing FitLife gist by description (for second-device setup)
+    async function _findGist() {
+      try {
+        const res = await fetch('https://api.github.com/gists', { headers: _headers() });
+        if (!res.ok) return null;
+        const list = await res.json();
+        const match = list.find(g => g.description === 'FitLife App Sync');
+        if (match) { _rawSet(GIST_KEY, match.id); return match.id; }
+      } catch(e) {}
+      return null;
+    }
+
+    async function push() {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      let gistId = localStorage.getItem(GIST_KEY);
+      _setStatus('syncing');
+      try {
+        // Embed gistId in bundle so second device can discover it
+        const bun = _bundle();
+        if (gistId) bun._gistId = gistId;
+        const content = JSON.stringify(bun, null, 2);
+        const body = { files: { [GIST_FILE]: { content } } };
+        let res;
+        if (gistId) {
+          res = await fetch(`https://api.github.com/gists/${gistId}`,
+            { method: 'PATCH', headers: _headers(), body: JSON.stringify(body) });
+        } else {
+          res = await fetch('https://api.github.com/gists',
+            { method: 'POST', headers: _headers(),
+              body: JSON.stringify({ ...body, description: 'FitLife App Sync', public: false }) });
+          const d = await res.json();
+          if (d.id) { _rawSet(GIST_KEY, d.id); gistId = d.id; }
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // Re-push with gistId embedded if we just created it
+        if (!bun._gistId && gistId) {
+          bun._gistId = gistId;
+          await fetch(`https://api.github.com/gists/${gistId}`,
+            { method: 'PATCH', headers: _headers(),
+              body: JSON.stringify({ files: { [GIST_FILE]: { content: JSON.stringify(bun, null, 2) } } }) });
+        }
+        _rawSet(SYNC_AT, String(Date.now()));
+        _setStatus('ok');
+      } catch(e) { _setStatus('error'); }
+    }
+
+    async function pull(signal) {
+      const token  = localStorage.getItem(TOKEN_KEY);
+      let gistId   = localStorage.getItem(GIST_KEY);
+      if (!token) return false;
+      if (!gistId) { gistId = await _findGist(); }
+      if (!gistId) return false;
+      try {
+        const res = await fetch(`https://api.github.com/gists/${gistId}`,
+          { headers: _headers(), signal });
+        if (!res.ok) return false;
+        const d = await res.json();
+        const content = d.files?.[GIST_FILE]?.content;
+        if (!content) return false;
+        const bundle = JSON.parse(content);
+        const localAt = parseInt(localStorage.getItem(SYNC_AT) || '0');
+        if ((bundle._syncedAt || 0) > localAt) { _applyBundle(bundle); return true; }
+        return false;
+      } catch(e) { return false; }
+    }
+
+    // Pull before React mounts — 3s timeout so boot screen never hangs
+    async function pullOnLoad() {
+      if (!localStorage.getItem(TOKEN_KEY)) return;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      await pull(ctrl.signal).finally(() => clearTimeout(t));
+    }
+
+    // Debounced push — 3s after last localStorage write to a sync key
+    let _pt = null;
+    function debouncedPush() { clearTimeout(_pt); _pt = setTimeout(push, 3000); }
+
+    // Monkey-patch localStorage.setItem
+    localStorage.setItem = function(key, value) {
+      _origSet(key, value);
+      if (SYNC_KEYS.includes(key)) debouncedPush();
+    };
+
+    return { push, pull, pullOnLoad, onStatus: cb => _cbs.push(cb), getStatus: () => _status };
+  })();
+  </script>
+
+  <script>
+    // Mount the app — pull sync data first so React initializes with latest state
+    (async function() {
+      try {
+        if (window._FitSync) await window._FitSync.pullOnLoad();
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(React.createElement(App));
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            var boot = document.getElementById('boot');
+            if (boot) {
+              boot.style.opacity = '0';
+              setTimeout(function() { if(boot.parentNode) boot.remove(); }, 400);
+            }
+          });
+        });
+      } catch(e) {
+        document.getElementById('boot').style.display = 'none';
+        document.getElementById('err').style.display = 'block';
+        document.getElementById('errmsg').textContent = e.stack || e.message;
+      }
+    })();
   </script>
 </body>
 </html>
