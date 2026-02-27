@@ -2062,26 +2062,6 @@ function App() {
           ) : null;
         })(),
 
-        // ── Micronutrients card ───────────────────────────────────
-        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
-          React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
-            React.createElement('div', { className: 'clbl', style: { margin: 0 } }, 'Micronutrients'),
-            React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase' } }, 'from supps + food')
-          ),
-          ...MICROS_META.map(m => {
-            const val = (tl.micros || {})[m.key] || 0;
-            const pct = Math.min(val / m.rda * 100, 100);
-            const dispVal = m.unit === 'g' ? val.toFixed(1) : m.unit === 'mcg' && m.rda < 10 ? val.toFixed(2) : Math.round(val);
-            const dispRda = m.unit === 'g' ? m.rda.toFixed(0) : m.rda;
-            return React.createElement('div', { key: m.key, className: 'mr', style: { marginBottom: 6 } },
-              React.createElement('span', { className: 'mn', style: { color: pct >= 100 ? m.color : 'var(--t2)' } }, m.label),
-              React.createElement('div', { className: 'mb' },
-                React.createElement('div', { className: 'mf', style: { width: `${pct}%`, background: m.color, opacity: pct >= 100 ? 1 : 0.75 } })
-              ),
-              React.createElement('span', { className: 'mv', style: { fontSize: 11 } }, `${dispVal}/${dispRda}${m.unit}`)
-            );
-          })
-        )
       ),
 
       // ── Targets view ─────────────────────────────────────────
