@@ -1561,8 +1561,8 @@ function App() {
             _type: f.dataType,
           };
         }).filter(f => f.cals100 > 0 || f.protein100 > 0);
-        // Sort: Foundation first, then SR Legacy, then Branded
-        const rank = { Foundation: 0, 'SR Legacy': 1, Branded: 2 };
+        // Sort: Foundation first, then SR Legacy, then Branded Food (USDA returns "Branded Food" not "Branded")
+        const rank = { Foundation: 0, 'SR Legacy': 1, 'Branded Food': 2, Branded: 2 };
         items.sort((a, b) => (rank[a._type] ?? 3) - (rank[b._type] ?? 3));
         setSuggestions(items.slice(0, 5).map(({ name, cals100, protein100, carbs100, fat100 }) => ({ name, cals100, protein100, carbs100, fat100 })));
       } catch(e) {
