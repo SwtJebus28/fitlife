@@ -1536,10 +1536,16 @@ function App() {
       if (!query || query.length < 2) { setSuggestions([]); return; }
       setSearching(true);
       try {
+        // Each fetch gets its own 5s timeout via AbortController
+        const fetchWithTimeout = (url, ms = 5000) => {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), ms);
+          return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+        };
         // Run USDA Foundation/SR Legacy (whole foods) and OFN (packaged) in parallel
         const [usdaRes, ofnRes] = await Promise.allSettled([
-          fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy&pageSize=6`),
-          fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&action=process&json=1&page_size=6&fields=product_name,nutriments`),
+          fetchWithTimeout(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy&pageSize=6`),
+          fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&action=process&json=1&page_size=6&fields=product_name,nutriments`),
         ]);
         let items = [];
         // USDA first — authoritative for whole foods (apple, chicken, cheese, roast beef, etc.)
@@ -1602,21 +1608,15 @@ function App() {
     };
 
     const addC = () => {
-      if (!c.name) return;
-      if (selectedFood) {
-        const preview = getPreview();
-        if (!preview) return;
-        add({ name: `${c.name} (${customAmt}${customUnit})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
-        setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
-        setSelectedFood(null);
-        setCustomAmt('100');
-        setCustomUnit('g');
-        setSuggestions([]);
-      } else {
-        if (!c.cals) return;
-        add({ name: c.name, cals: +c.cals, protein: +c.protein || 0, fat: +c.fat || 0, carbs: +c.carbs || 0 });
-        setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
-      }
+      if (!selectedFood) return;
+      const preview = getPreview();
+      if (!preview) return;
+      add({ name: `${c.name} (${customAmt}${customUnit})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
+      setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+      setSelectedFood(null);
+      setCustomAmt('100');
+      setCustomUnit('g');
+      setSuggestions([]);
     };
 
     const left = USER.targetCals - tl.cals;
@@ -1818,7 +1818,7 @@ function App() {
           React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
           React.createElement('div', { className: 'ig', style: { position: 'relative' } },
             React.createElement('label', { className: 'ilbl' }, 'Food Name'),
-            React.createElement('input', { className: 'inp', placeholder: 'e.g. Coffee, Chicken breast', value: c.name, onChange: e => handleNameChange(e.target.value), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false }),
+            React.createElement('input', { className: 'inp', type: 'search', placeholder: 'e.g. Coffee, Chicken breast', value: c.name, onChange: e => handleNameChange(e.target.value), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false }),
             searching && React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 4 } }, 'Searching...'),
             suggestions.length > 0 && React.createElement('div', {
               style: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, overflow: 'hidden', marginTop: 2 }
@@ -1862,16 +1862,8 @@ function App() {
                   ) : null;
                 })()
               )
-            : React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
-                ...[
-                  { k: 'cals',    lbl: 'Calories',    ph: '400' },
-                  { k: 'protein', lbl: 'Protein (g)',  ph: '35'  },
-                  { k: 'carbs',   lbl: 'Carbs (g)',    ph: '20'  },
-                  { k: 'fat',     lbl: 'Fat (g)',      ph: '18'  },
-                ].map(f => React.createElement('div', { key: f.k, className: 'ig' },
-                  React.createElement('label', { className: 'ilbl' }, f.lbl),
-                  React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: f.ph, value: c[f.k], onChange: e => setC(p => ({ ...p, [f.k]: e.target.value })) })
-                ))
+            : React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', padding: '10px 4px' } },
+                'Type a food name above to search, or use Quick Add / 📸 Scan Label below.'
               ),
           React.createElement('button', { className: 'btn full', style: { marginTop: 10 }, onClick: addC }, 'Add Food')
         )
