@@ -1528,6 +1528,10 @@ function App() {
     const [selectedFood, setSelectedFood] = React.useState(null);
     const [customAmt, setCustomAmt] = React.useState('100');
     const [customUnit, setCustomUnit] = React.useState('g');
+    const [servingMeasures, setServingMeasures] = React.useState(null); // null=not loaded, [{text,gramWeight}]
+    const [selectedMeasureIdx, setSelectedMeasureIdx] = React.useState(0);
+    const [servingQty, setServingQty] = React.useState('1');
+    const [loadingMeasures, setLoadingMeasures] = React.useState(false);
     const searchTimerRef = React.useRef(null);
 
     const unitFactors = { g: 1, oz: 28.35, lb: 453.59, cup: 237, 'fl oz': 29.57 };
@@ -1552,19 +1556,24 @@ function App() {
           const parts = (f.description || '').split(',');
           const name = parts[0].trim().replace(/\b\w/g, l => l.toUpperCase()) +
             (parts[1] ? ` (${parts[1].trim().toLowerCase()})` : '');
+          // Energy: try 1008 (kcal), 2047/2048 (Atwater variants), 1062 (kJ÷4.184)
+          const kcal = nmap[1008] || nmap[2047] || nmap[2048] || Math.round((nmap[1062] || 0) / 4.184) || 0;
           return {
             name,
-            cals100: Math.round(nmap[1008] || nmap[1062] || 0),
+            cals100: Math.round(kcal),
             protein100: +((nmap[1003] || 0).toFixed(1)),
             carbs100:   +((nmap[1005] || 0).toFixed(1)),
             fat100:     +((nmap[1004] || 0).toFixed(1)),
+            fdcId: f.fdcId,
+            servingSize: f.servingSize || null,
+            servingSizeUnit: (f.servingSizeUnit || 'g').toLowerCase(),
             _type: f.dataType,
           };
         }).filter(f => f.cals100 > 0 || f.protein100 > 0);
         // Sort: Foundation first, then SR Legacy, then Branded Food (USDA returns "Branded Food" not "Branded")
         const rank = { Foundation: 0, 'SR Legacy': 1, 'Branded Food': 2, Branded: 2 };
         items.sort((a, b) => (rank[a._type] ?? 3) - (rank[b._type] ?? 3));
-        setSuggestions(items.slice(0, 5).map(({ name, cals100, protein100, carbs100, fat100 }) => ({ name, cals100, protein100, carbs100, fat100 })));
+        setSuggestions(items.slice(0, 5).map(({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit }) => ({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit })));
       } catch(e) {
         setSuggestions([]);
       } finally {
@@ -1575,21 +1584,51 @@ function App() {
     const handleNameChange = (val) => {
       setC(p => ({ ...p, name: val }));
       setSelectedFood(null);
+      setServingMeasures(null);
       clearTimeout(searchTimerRef.current);
       searchTimerRef.current = setTimeout(() => searchFoods(val), 500);
     };
 
-    const selectSuggestion = (s) => {
+    const selectSuggestion = async (s) => {
       setC(p => ({ ...p, name: s.name, cals: '', protein: '', carbs: '', fat: '' }));
       setSelectedFood(s);
       setSuggestions([]);
-      setCustomAmt('100');
-      setCustomUnit('g');
+      setServingQty('1');
+      setSelectedMeasureIdx(0);
+      setServingMeasures(null);
+      if (!s.fdcId) return;
+      setLoadingMeasures(true);
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const res = await fetch(`https://api.nal.usda.gov/fdc/v1/food/${s.fdcId}?api_key=DEMO_KEY`, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+        if (res.ok) {
+          const data = await res.json();
+          let measures = (data.foodMeasures || [])
+            .filter(m => m.gramWeight > 0)
+            .map(m => ({ text: m.disseminationText, gramWeight: m.gramWeight }));
+          if (measures.length === 0 && s.servingSize && s.servingSizeUnit === 'g') {
+            measures = [{ text: `1 serving (${s.servingSize}g)`, gramWeight: s.servingSize }];
+          }
+          measures.push({ text: '100g', gramWeight: 100 });
+          setServingMeasures(measures);
+          setSelectedMeasureIdx(0);
+        }
+      } catch(e) {
+        setServingMeasures([{ text: '100g', gramWeight: 100 }]);
+      } finally {
+        setLoadingMeasures(false);
+      }
     };
 
     const getPreview = () => {
       if (!selectedFood) return null;
-      const grams = parseFloat(customAmt) * (unitFactors[customUnit] || 1);
+      let grams;
+      if (servingMeasures && servingMeasures.length > 0) {
+        grams = servingMeasures[selectedMeasureIdx].gramWeight * (parseFloat(servingQty) || 1);
+      } else {
+        grams = parseFloat(customAmt) * (unitFactors[customUnit] || 1);
+      }
       if (!grams || isNaN(grams)) return null;
       const scale = grams / 100;
       return {
@@ -1605,9 +1644,19 @@ function App() {
       if (!selectedFood) return;
       const preview = getPreview();
       if (!preview) return;
-      add({ name: `${c.name} (${customAmt}${customUnit})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
+      let label;
+      if (servingMeasures && servingMeasures.length > 0) {
+        const qty = parseFloat(servingQty) || 1;
+        label = qty === 1 ? servingMeasures[selectedMeasureIdx].text : `${qty}× ${servingMeasures[selectedMeasureIdx].text}`;
+      } else {
+        label = `${customAmt}${customUnit}`;
+      }
+      add({ name: `${c.name} (${label})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
       setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
       setSelectedFood(null);
+      setServingMeasures(null);
+      setServingQty('1');
+      setSelectedMeasureIdx(0);
       setCustomAmt('100');
       setCustomUnit('g');
       setSuggestions([]);
@@ -1831,18 +1880,33 @@ function App() {
           ),
           selectedFood
             ? React.createElement(React.Fragment, null,
-                React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 2 } },
-                  React.createElement('div', { className: 'ig', style: { flex: 1 } },
-                    React.createElement('label', { className: 'ilbl' }, 'Amount'),
-                    React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '100', value: customAmt, onChange: e => setCustomAmt(e.target.value) })
-                  ),
-                  React.createElement('div', { className: 'ig', style: { flex: 1 } },
-                    React.createElement('label', { className: 'ilbl' }, 'Unit'),
-                    React.createElement('select', { className: 'inp', value: customUnit, onChange: e => setCustomUnit(e.target.value), style: { appearance: 'auto' } },
-                      ...Object.keys(unitFactors).map(u => React.createElement('option', { key: u, value: u }, u))
-                    )
-                  )
-                ),
+                loadingMeasures
+                  ? React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', padding: '10px 4px' } }, 'Loading serving sizes…')
+                  : servingMeasures
+                    ? React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+                        React.createElement('div', { className: 'ig', style: { flex: 2 } },
+                          React.createElement('label', { className: 'ilbl' }, 'Serving'),
+                          React.createElement('select', { className: 'inp', value: selectedMeasureIdx, onChange: e => setSelectedMeasureIdx(+e.target.value), style: { appearance: 'auto' } },
+                            ...servingMeasures.map((m, i) => React.createElement('option', { key: i, value: i }, m.text))
+                          )
+                        ),
+                        React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                          React.createElement('label', { className: 'ilbl' }, 'Qty'),
+                          React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '1', value: servingQty, onChange: e => setServingQty(e.target.value) })
+                        )
+                      )
+                    : React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+                        React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                          React.createElement('label', { className: 'ilbl' }, 'Amount'),
+                          React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '100', value: customAmt, onChange: e => setCustomAmt(e.target.value) })
+                        ),
+                        React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                          React.createElement('label', { className: 'ilbl' }, 'Unit'),
+                          React.createElement('select', { className: 'inp', value: customUnit, onChange: e => setCustomUnit(e.target.value), style: { appearance: 'auto' } },
+                            ...Object.keys(unitFactors).map(u => React.createElement('option', { key: u, value: u }, u))
+                          )
+                        )
+                      ),
                 (() => {
                   const p = getPreview();
                   return p ? React.createElement('div', {
