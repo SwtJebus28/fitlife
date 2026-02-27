@@ -1536,41 +1536,35 @@ function App() {
       if (!query || query.length < 2) { setSuggestions([]); return; }
       setSearching(true);
       try {
-        // Each fetch gets its own 5s timeout via AbortController
-        const fetchWithTimeout = (url, ms = 5000) => {
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), ms);
-          return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(t));
-        };
-        // Run USDA Foundation/SR Legacy (whole foods) and OFN (packaged) in parallel
-        const [usdaRes, ofnRes] = await Promise.allSettled([
-          fetchWithTimeout(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy&pageSize=6`),
-          fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&action=process&json=1&page_size=6&fields=product_name,nutriments`),
-        ]);
-        let items = [];
-        // USDA first — authoritative for whole foods (apple, chicken, cheese, roast beef, etc.)
-        if (usdaRes.status === 'fulfilled' && usdaRes.value.ok) {
-          const data = await usdaRes.value.json();
-          const parsed = (data.foods || []).map(f => {
-            const nmap = {};
-            (f.foodNutrients || []).forEach(n => { nmap[n.nutrientId] = n.value; });
-            const parts = (f.description || '').split(',');
-            // "Apples, raw, with skin" → "Apples (raw)" | "Cheese, cheddar" → "Cheese (cheddar)"
-            const name = parts[0].trim().replace(/\b\w/g, l => l.toUpperCase()) +
-              (parts[1] ? ` (${parts[1].trim().toLowerCase()})` : '');
-            return { name, cals100: Math.round(nmap[1008] || nmap[1062] || 0), protein100: +((nmap[1003]||0).toFixed(1)), carbs100: +((nmap[1005]||0).toFixed(1)), fat100: +((nmap[1004]||0).toFixed(1)) };
-          }).filter(f => f.cals100 > 0 || f.protein100 > 0);
-          items.push(...parsed.slice(0, 4));
-        }
-        // OFN fills remaining slots — good for packaged/branded foods
-        if (ofnRes.status === 'fulfilled' && ofnRes.value.ok && items.length < 5) {
-          const data = await ofnRes.value.json();
-          const parsed = (data.products || [])
-            .filter(p => p.product_name && p.nutriments && p.nutriments['energy-kcal_100g'] != null)
-            .map(p => ({ name: p.product_name, cals100: Math.round(p.nutriments['energy-kcal_100g']||0), protein100: +((p.nutriments['proteins_100g']||0).toFixed(1)), carbs100: +((p.nutriments['carbohydrates_100g']||0).toFixed(1)), fat100: +((p.nutriments['fat_100g']||0).toFixed(1)) }));
-          items.push(...parsed.slice(0, 5 - items.length));
-        }
-        setSuggestions(items.slice(0, 5));
+        // Single USDA call — Foundation+SR Legacy for whole foods, Branded for packaged.
+        // Avoids OFN which returns anything containing the word (apple → croissants, strudels).
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 6000);
+        const res = await fetch(
+          `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy,Branded&pageSize=10`,
+          { signal: ctrl.signal }
+        ).finally(() => clearTimeout(t));
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const items = (data.foods || []).map(f => {
+          const nmap = {};
+          (f.foodNutrients || []).forEach(n => { nmap[n.nutrientId] = n.value; });
+          const parts = (f.description || '').split(',');
+          const name = parts[0].trim().replace(/\b\w/g, l => l.toUpperCase()) +
+            (parts[1] ? ` (${parts[1].trim().toLowerCase()})` : '');
+          return {
+            name,
+            cals100: Math.round(nmap[1008] || nmap[1062] || 0),
+            protein100: +((nmap[1003] || 0).toFixed(1)),
+            carbs100:   +((nmap[1005] || 0).toFixed(1)),
+            fat100:     +((nmap[1004] || 0).toFixed(1)),
+            _type: f.dataType,
+          };
+        }).filter(f => f.cals100 > 0 || f.protein100 > 0);
+        // Sort: Foundation first, then SR Legacy, then Branded
+        const rank = { Foundation: 0, 'SR Legacy': 1, Branded: 2 };
+        items.sort((a, b) => (rank[a._type] ?? 3) - (rank[b._type] ?? 3));
+        setSuggestions(items.slice(0, 5).map(({ name, cals100, protein100, carbs100, fat100 }) => ({ name, cals100, protein100, carbs100, fat100 })));
       } catch(e) {
         setSuggestions([]);
       } finally {
