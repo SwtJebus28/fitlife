@@ -1782,27 +1782,6 @@ function App() {
         )
       ),
 
-      // ── Micronutrients card ───────────────────────────────────
-      React.createElement('div', { className: 'card', style: { marginTop: 10 } },
-        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
-          React.createElement('div', { className: 'clbl', style: { margin: 0 } }, 'Micronutrients'),
-          React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase' } }, 'from supps + food')
-        ),
-        ...MICROS_META.map(m => {
-          const val = (tl.micros || {})[m.key] || 0;
-          const pct = Math.min(val / m.rda * 100, 100);
-          const dispVal = m.unit === 'g' ? val.toFixed(1) : m.unit === 'mcg' && m.rda < 10 ? val.toFixed(2) : Math.round(val);
-          const dispRda = m.unit === 'g' ? m.rda.toFixed(0) : m.rda;
-          return React.createElement('div', { key: m.key, className: 'mr', style: { marginBottom: 6 } },
-            React.createElement('span', { className: 'mn', style: { color: pct >= 100 ? m.color : 'var(--t2)' } }, m.label),
-            React.createElement('div', { className: 'mb' },
-              React.createElement('div', { className: 'mf', style: { width: `${pct}%`, background: m.color, opacity: pct >= 100 ? 1 : 0.75 } })
-            ),
-            React.createElement('span', { className: 'mv', style: { fontSize: 11 } }, `${dispVal}/${dispRda}${m.unit}`)
-          );
-        })
-      ),
-
       // ── Log Food view ────────────────────────────────────────
       view === 'log' && React.createElement(React.Fragment, null,
         // Barcode Scanner card
@@ -1825,35 +1804,31 @@ function App() {
             onClick: () => { setLabelScanMode('food'); setShowLabelScanner(true); }
           }, '📸 Scan Label')
         ),
-        // My Foods card — only shown after first scan save
-        myFoods.length > 0 && React.createElement('div', { className: 'card' },
-          React.createElement('div', { className: 'clbl' }, 'My Foods'),
-          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
-            ...myFoods.map(f => React.createElement('div', {
-              key: f.id,
-              style: { display: 'flex', alignItems: 'center', background: 'var(--surface2)', borderRadius: 20, overflow: 'hidden', border: '1px solid var(--border)' }
+        // Quick Add card — My Foods + presets combined, sorted alphabetically
+        React.createElement('div', { className: 'card' },
+          React.createElement('div', { className: 'clbl' }, 'Quick Add'),
+          React.createElement('div', { style: { maxHeight: 220, overflowY: 'auto' } },
+            ...[
+              ...myFoods.map(f => ({ ...f, _type: 'my', _cal: Math.round(f.cals100 * f.defaultGrams / 100) })),
+              ...FOODS.map(f => ({ ...f, _type: 'preset', _cal: f.cals }))
+            ]
+            .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+            .map((f, i, arr) => React.createElement('div', {
+              key: `${f._type}-${f.name}-${i}`,
+              style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }
             },
               React.createElement('span', {
-                style: { padding: '5px 10px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' },
-                onClick: () => addMyFood(f)
+                style: { flex: 1, fontSize: 13, color: 'var(--t2)', cursor: 'pointer' },
+                onClick: () => f._type === 'my' ? addMyFood(f) : add(f)
               },
                 '+ ', f.name,
-                React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 4 } },
-                  `${Math.round(f.cals100 * f.defaultGrams / 100)} cal`
-                )
+                React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 6 } }, `${f._cal} cal`)
               ),
-              React.createElement('span', {
-                style: { padding: '5px 8px 5px 2px', fontSize: 14, color: 'var(--t3)', cursor: 'pointer' },
+              f._type === 'my' && React.createElement('span', {
+                style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 6px', lineHeight: 1 },
                 onClick: () => removeFromMyFoods(f.id)
               }, '×')
             ))
-          )
-        ),
-        // Quick Add card
-        React.createElement('div', { className: 'card' },
-          React.createElement('div', { className: 'clbl' }, 'Quick Add'),
-          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap' } },
-            ...FOODS.map((f, i) => React.createElement('span', { key: i, className: 'pill', onClick: () => add(f) }, '+ ', f.name))
           )
         ),
         // Custom Entry card with smart search
@@ -2065,7 +2040,28 @@ function App() {
               React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', lineHeight: 1.55 } }, r.note)
             ))
           ) : null;
-        })()
+        })(),
+
+        // ── Micronutrients card ───────────────────────────────────
+        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+          React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
+            React.createElement('div', { className: 'clbl', style: { margin: 0 } }, 'Micronutrients'),
+            React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)', textTransform: 'uppercase' } }, 'from supps + food')
+          ),
+          ...MICROS_META.map(m => {
+            const val = (tl.micros || {})[m.key] || 0;
+            const pct = Math.min(val / m.rda * 100, 100);
+            const dispVal = m.unit === 'g' ? val.toFixed(1) : m.unit === 'mcg' && m.rda < 10 ? val.toFixed(2) : Math.round(val);
+            const dispRda = m.unit === 'g' ? m.rda.toFixed(0) : m.rda;
+            return React.createElement('div', { key: m.key, className: 'mr', style: { marginBottom: 6 } },
+              React.createElement('span', { className: 'mn', style: { color: pct >= 100 ? m.color : 'var(--t2)' } }, m.label),
+              React.createElement('div', { className: 'mb' },
+                React.createElement('div', { className: 'mf', style: { width: `${pct}%`, background: m.color, opacity: pct >= 100 ? 1 : 0.75 } })
+              ),
+              React.createElement('span', { className: 'mv', style: { fontSize: 11 } }, `${dispVal}/${dispRda}${m.unit}`)
+            );
+          })
+        )
       ),
 
       // ── Targets view ─────────────────────────────────────────
