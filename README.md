@@ -39,24 +39,32 @@ A dedicated Mobility tab with 6 sections built specifically around desk-worker h
 
 All entries link directly to YouTube demos or source content.
 
-### 🥗 Nutrition
-- Daily calorie ring and macro progress bars (protein / carbs / fat)
-- Quick-add library of 14 common foods
-- Custom food entry
-- Calculated targets: 2,150 cal · 175g protein · 190g carbs · 65g fat
+### 🥗 Nutrition — Fuel Tab
+4 sub-tabs: **Today · Log Food · Supps · Targets**
+
+**Today tab**
+- Calorie ring + macro progress bars (protein / carbs / fat) with daily totals
+
+**Log Food tab**
+- **Barcode Scanner** — live camera viewfinder scans EAN-13, UPC-A, UPC-E, Code 128 and more; auto-looks up Open Food Facts → USDA FoodData Central fallback; scanned foods save to *My Foods* for one-tap re-add
+- **Scan Label** — Claude Vision reads any Nutrition Facts or Supplement Facts label (photo) and extracts macros automatically
+- **Smart food search** — type any food name; queries USDA FoodData Central (Foundation → SR Legacy → Branded, sorted by data quality); select a result → serving size dropdown with named portions ("1 medium apple", "1 cup sliced") + quantity multiplier; macros scale automatically
+- **Quick Add** — alphabetical scrollable list combining your saved *My Foods* (with × remove) and 14 preset foods; calorie count shown on each item
+
+**Supps tab**
+- **My Stack** — daily supplement checklist; checking off records the dose; resets at midnight
+  - *FUEL badge*: macro supplements (protein powder, etc.) auto-log calories + macros to daily totals
+  - Timing color codes: amber=morning, lime=pre-workout, blue=post-workout, purple=bedtime
+- Add supplements by barcode scan, label photo (Claude Vision), or manual entry
+- **Recommended for 56yo male**: Creatine, D3+K2, Omega-3, Magnesium, Collagen Peptides, NAD+, Fiber, Whey Protein — hides items already in your stack
+- **Micronutrient tracker** — 10 color-coded progress bars vs age-appropriate RDA targets, fed by both supplement check-ins and food barcode scans:
+  Fiber · Vitamin D · Vitamin K · Omega-3 · Magnesium · Calcium · Zinc · B12 · Vitamin C · Potassium
+
+**Targets tab**
+- TDEE, daily calorie target, and macro breakdown calculated for your profile
 
 ### 🤖 AI Coach
-Powered by Claude (Anthropic). The coach knows your full profile, exercise library, workout history, working weights, and all 5 cardio protocols. Ask it anything about programming, progression, mobility, or nutrition.
-
-### 📷 Barcode Scanner *(Sprint 1)*
-Camera-based food barcode scanning built into the Fuel tab:
-- Tap **Scan Food Barcode** in Log Food to open the live camera viewfinder
-- Point at any packaged food barcode — auto-detects EAN-13, UPC-A, UPC-E, Code 128, and more
-- Nutrition data (calories, protein, carbs, fat) auto-fills from [Open Food Facts](https://world.openfoodfacts.org/) — free, no API key required
-- Adjust serving size in grams — scaled nutrition updates in real time
-- One tap to add to your daily log
-- Falls back gracefully if barcode is not in the database or camera is unavailable
-- Uses native `BarcodeDetector` API (iOS 17+ / Chrome 83+) — no external library, no extra load time
+Powered by Claude (Anthropic). The coach knows your full profile, exercise library, workout history, working weights, and all 5 cardio protocols. Requires an Anthropic API key stored locally — never committed to the repo.
 
 ---
 
@@ -88,31 +96,28 @@ The app opens full-screen with no browser chrome, just like a native app. All wo
 
 ```
 fitlife/
-├── index.html          # Production app (pre-compiled, deploy this)
-├── fitness-app.jsx     # Source JSX (edit this, then compile)
-├── MEMORY.md           # Project context and sprint backlog for Claude
-└── README.md           # This file
+├── index.html   # Single-file production app — deploy this
+└── README.md    # This file
 ```
 
-### Editing & Deploying
-
-The app is written in JSX (`fitness-app.jsx`) and compiled to vanilla JS before deployment. To make changes:
-
-1. Edit `fitness-app.jsx`
-2. Compile JSX → JS using esbuild
-3. The output replaces the `<script>` block in `index.html`
-4. Push to GitHub — Pages auto-deploys in ~60 seconds
+New features are implemented directly in `index.html` as additional `<script>` blocks. Push to `main` — GitHub Pages deploys in ~60 seconds.
 
 ---
 
 ## Roadmap
 
-- [x] **Barcode scanner** — camera-based food barcode scanning with Open Food Facts API lookup *(Sprint 1)*
-- [ ] **Mindfulness tab** — box breathing, 4-7-8, physiological sigh (animated guides), meditation timer
-- [ ] **Fitbit integration** — pull steps, sleep score, and resting HR via Fitbit Web API (OAuth)
-- [ ] Body weight / measurements tracker
+- [x] **Barcode scanner** — OFN + USDA dual-lookup, iOS Quagga2 fallback *(Sprint 1)*
+- [x] **My Foods** — scanned foods saved for instant re-add *(Sprint 1b)*
+- [x] **Smart food search** — USDA FoodData Central name search with serving size dropdown *(Sprint 1b / 4b)*
+- [x] **Supplements tab** — My Stack checklist, macro FUEL tracking, Recommended stack *(Sprint 2)*
+- [x] **Claude Vision label scanning** — photo any nutrition/supplement label to extract macros *(Sprint 3)*
+- [x] **Micronutrient tracking** — 10 nutrients with age-appropriate RDAs, fed by supps + food scans *(Sprint 4)*
+- [ ] **Cross-device sync** — Supabase (or GitHub Gist) so iPhone and iPad share the same data *(Sprint 3 in backlog)*
+- [ ] **Mindfulness tab** — box breathing, 4-7-8, physiological sigh (animated guides), meditation timer *(Sprint 5)*
+- [ ] **Fitbit integration** — steps, sleep score, resting HR via Fitbit Web API OAuth *(Sprint 6)*
+- [ ] **Body metrics tracker** — weight trend graph, measurements, progress photos *(Sprint 7)*
+- [ ] **Export** — workout history and nutrition log to CSV *(Sprint 8)*
 - [ ] Gymnastic rings progression module
-- [ ] Export workout data to CSV
 
 ---
 
