@@ -1362,7 +1362,35 @@ function App() {
   // NutritionTab override — adds Scan Barcode, My Foods, smart search
   // ============================================================
   const MY_FOODS_KEY = 'fitlife_my_foods';
-  const _getMyFoods = () => { try { return JSON.parse(localStorage.getItem(MY_FOODS_KEY) || '[]'); } catch(e) { return []; } };
+  const _SEEDED_KEY = 'fitlife_presets_v1';
+  const _PRESET_FOODS_DATA = [
+    { id: 'preset_1',  _presetId: 'preset_1',  name: 'Chicken Breast (6oz)',    defaultGrams: 170, defaultUnit: 'g', cals100: 109, protein100: 20.6, carbs100: 0,    fat100: 2.4,  micros100: { niacin: 8.8, iron: 0.6, potassium: 213, b12: 0.2, vitE: 0.2 } },
+    { id: 'preset_2',  _presetId: 'preset_2',  name: 'Greek Yogurt (1 cup)',    defaultGrams: 245, defaultUnit: 'g', cals100:  53, protein100:  9.0, carbs100: 3.7,  fat100: 0,    micros100: { calcium: 127, b12: 0.5, potassium: 147, zinc: 0.7 } },
+    { id: 'preset_3',  _presetId: 'preset_3',  name: 'Eggs (2 large)',          defaultGrams: 100, defaultUnit: 'g', cals100: 140, protein100: 12.0, carbs100: 0,    fat100: 10,   micros100: { vitD: 82, b12: 0.9, vitE: 1.1, iron: 1.9, niacin: 0.1 } },
+    { id: 'preset_4',  _presetId: 'preset_4',  name: 'Brown Rice (1 cup)',      defaultGrams: 195, defaultUnit: 'g', cals100: 110, protein100:  2.6, carbs100: 23.1, fat100: 1.0,  micros100: { niacin: 1.5, iron: 0.4, potassium: 43, magnesium: 43, fiber: 1.8 } },
+    { id: 'preset_5',  _presetId: 'preset_5',  name: 'Banana',                  defaultGrams: 118, defaultUnit: 'g', cals100:  89, protein100:  1.1, carbs100: 22.8, fat100: 0.3,  micros100: { potassium: 358, vitC: 8, fiber: 2.6, magnesium: 27, niacin: 0.7 } },
+    { id: 'preset_6',  _presetId: 'preset_6',  name: 'Cottage Cheese (½c)',     defaultGrams: 113, defaultUnit: 'g', cals100:  80, protein100: 11.1, carbs100: 3.5,  fat100: 1.8,  micros100: { calcium: 61, b12: 0.4, potassium: 91, niacin: 0.3 } },
+    { id: 'preset_7',  _presetId: 'preset_7',  name: 'Almonds (1oz)',           defaultGrams:  28, defaultUnit: 'g', cals100: 571, protein100: 21.4, carbs100: 21.4, fat100: 50,   micros100: { vitE: 26.1, magnesium: 271, calcium: 271, fiber: 12.5, iron: 3.9 } },
+    { id: 'preset_8',  _presetId: 'preset_8',  name: 'Salmon (5oz)',            defaultGrams: 142, defaultUnit: 'g', cals100: 176, protein100: 24.6, carbs100: 0,    fat100: 8.5,  micros100: { niacin: 7.7, vitD: 423, b12: 3.3, omega3: 1592, potassium: 435, iron: 0.6 } },
+    { id: 'preset_9',  _presetId: 'preset_9',  name: 'Oatmeal (½c dry)',        defaultGrams:  40, defaultUnit: 'g', cals100: 375, protein100: 12.5, carbs100: 67.5, fat100: 7.5,  micros100: { fiber: 10, iron: 5, magnesium: 100, zinc: 3.5 } },
+    { id: 'preset_10', _presetId: 'preset_10', name: 'Protein Shake',           defaultGrams: 300, defaultUnit: 'g', cals100:  43, protein100:  8.3, carbs100: 1.7,  fat100: 0.7,  micros100: {} },
+    { id: 'preset_11', _presetId: 'preset_11', name: 'Sweet Potato (med)',      defaultGrams: 130, defaultUnit: 'g', cals100: 100, protein100:  2.3, carbs100: 23.1, fat100: 0.2,  micros100: { potassium: 337, fiber: 2.9, vitC: 15, vitE: 0.3 } },
+    { id: 'preset_12', _presetId: 'preset_12', name: 'Broccoli (2 cups)',       defaultGrams: 182, defaultUnit: 'g', cals100:  33, protein100:  2.7, carbs100: 6.6,  fat100: 0.4,  micros100: { vitC: 55, vitK: 106, fiber: 2.6, calcium: 48, iron: 0.8, potassium: 277 } },
+    { id: 'preset_13', _presetId: 'preset_13', name: 'Ground Beef 93% (5oz)',   defaultGrams: 142, defaultUnit: 'g', cals100: 151, protein100: 21.1, carbs100: 0,    fat100: 7.0,  micros100: { zinc: 5.4, iron: 1.9, b12: 1.6, niacin: 5.4 } },
+    { id: 'preset_14', _presetId: 'preset_14', name: 'Whole Milk (1 cup)',      defaultGrams: 244, defaultUnit: 'g', cals100:  61, protein100:  3.3, carbs100: 4.9,  fat100: 3.3,  micros100: { calcium: 113, vitD: 40, b12: 0.45, potassium: 132 } },
+  ];
+  const _getMyFoods = () => {
+    try {
+      let arr = JSON.parse(localStorage.getItem(MY_FOODS_KEY) || '[]');
+      if (!localStorage.getItem(_SEEDED_KEY)) {
+        const existingIds = new Set(arr.filter(f => f._presetId).map(f => f._presetId));
+        const toAdd = _PRESET_FOODS_DATA.filter(p => !existingIds.has(p._presetId));
+        if (toAdd.length > 0) { arr = [...toAdd, ...arr]; localStorage.setItem(MY_FOODS_KEY, JSON.stringify(arr)); }
+        localStorage.setItem(_SEEDED_KEY, '1');
+      }
+      return arr;
+    } catch(e) { return []; }
+  };
   const _saveMyFoodsLS = (arr) => { try { localStorage.setItem(MY_FOODS_KEY, JSON.stringify(arr)); } catch(e) {} };
 
   const SUPPS_KEY = 'fitlife_supps';
@@ -1728,11 +1756,14 @@ function App() {
       if (f.micros100) {
         Object.entries(f.micros100).forEach(([k, v]) => {
           const sc = v * scale;
-          micros[k] = k === 'fiber' || k === 'b12' || k === 'zinc' || k === 'vitK' ? +sc.toFixed(k === 'b12' ? 2 : 1) : Math.round(sc);
+          micros[k] = (k === 'fiber' || k === 'b12' || k === 'zinc' || k === 'vitK' || k === 'iron' || k === 'niacin' || k === 'vitE')
+            ? +sc.toFixed(k === 'b12' ? 2 : 1)
+            : Math.round(sc);
         });
       }
+      const displayName = f.name.includes('(') ? f.name : `${f.name} (${g}g)`;
       add({
-        name: `${f.name} (${g}g)`,
+        name: displayName,
         cals: Math.round(f.cals100 * scale),
         protein: Math.round(f.protein100 * scale * 10) / 10,
         carbs: Math.round(f.carbs100 * scale * 10) / 10,
@@ -2262,29 +2293,27 @@ function App() {
           : React.createElement('div', { className: 'card' },
               React.createElement('div', { className: 'clbl' }, 'Quick Add'),
               React.createElement('div', { style: { maxHeight: 220, overflowY: 'auto' } },
-                ...[
-                  ...myFoods.map(f => ({ ...f, _type: 'my', _cal: Math.round(f.cals100 * f.defaultGrams / 100) })),
-                  ...FOODS.map(f => ({ ...f, _type: 'preset', _cal: f.cals }))
-                ]
+                ...myFoods
+                .map(f => ({ ...f, _cal: Math.round(f.cals100 * f.defaultGrams / 100) }))
                 .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
                 .map((f, i, arr) => {
                   const borderStyle = i < arr.length - 1 ? '1px solid var(--border)' : 'none';
                   return React.createElement('div', {
-                    key: `${f._type}-${f.name}-${i}`,
+                    key: `${f.id}-${i}`,
                     style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: borderStyle }
                   },
                     React.createElement('span', {
                       style: { flex: 1, fontSize: 13, color: 'var(--t2)', cursor: 'pointer' },
-                      onClick: () => f._type === 'my' ? addMyFood(f) : add(f)
+                      onClick: () => addMyFood(f)
                     },
                       '+ ', f.name,
                       React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 6 } }, `${f._cal} cal`)
                     ),
-                    f._type === 'my' && React.createElement('span', {
+                    React.createElement('span', {
                       style: { fontSize: 15, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
                       onClick: () => startEditFood(f)
                     }, '✏️'),
-                    f._type === 'my' && React.createElement('span', {
+                    React.createElement('span', {
                       style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
                       onClick: () => removeFromMyFoods(f.id)
                     }, '×')
