@@ -1507,7 +1507,13 @@ function App() {
         fat:     Math.round((tl.fat     + (+(food.fat     || 0))) * 10) / 10,
         carbs:   Math.round((tl.carbs   + (+(food.carbs   || 0))) * 10) / 10,
         micros: mergedMicros,
-        items: [...(tl.items || []), { name: food.name, cals: +(food.cals||0), protein: +(food.protein||0), carbs: +(food.carbs||0), fat: +(food.fat||0) }],
+        items: [...(tl.items || []), {
+          name: food.name,
+          cals: +(food.cals||0), protein: +(food.protein||0), carbs: +(food.carbs||0), fat: +(food.fat||0),
+          _cals1: +(food.cals||0), _protein1: +(food.protein||0), _carbs1: +(food.carbs||0), _fat1: +(food.fat||0),
+          _micros1: food.micros ? { ...food.micros } : {},
+          _qty: 1,
+        }],
       };
       const nn = [u, ...nutrition.filter(n => n.date !== today)];
       setNutrition(nn);
@@ -1517,17 +1523,66 @@ function App() {
     const removeItem = async (idx) => {
       const item = (tl.items || [])[idx];
       const isObj = item && typeof item === 'object';
+      // Subtract micros if we stored per-1x values (new items have _micros1)
+      let micros = { ...(tl.micros || {}) };
+      if (isObj && item._micros1) {
+        Object.entries(item._micros1).forEach(([k, v]) => {
+          const qty = item._qty || 1;
+          micros[k] = Math.max(0, +((( micros[k] || 0) - v * qty).toFixed(2)));
+        });
+      }
       const u = {
         ...tl,
         cals:    Math.max(0, Math.round(tl.cals    - (isObj ? item.cals    : 0))),
         protein: Math.max(0, Math.round((tl.protein - (isObj ? item.protein : 0)) * 10) / 10),
         fat:     Math.max(0, Math.round((tl.fat     - (isObj ? item.fat     : 0)) * 10) / 10),
         carbs:   Math.max(0, Math.round((tl.carbs   - (isObj ? item.carbs   : 0)) * 10) / 10),
+        micros,
         items: (tl.items || []).filter((_, i) => i !== idx),
       };
       const nn = [u, ...nutrition.filter(n => n.date !== today)];
       setNutrition(nn);
       await sset('nutrition', nn);
+    };
+
+    // Qty editor state for Logged Today items
+    const [logItemQty, setLogItemQty] = React.useState({ idx: null, draft: '' });
+
+    const updateItemQty = async (idx, newQtyRaw) => {
+      const newQty = Math.max(0.25, parseFloat(newQtyRaw) || 1);
+      const items = tl.items || [];
+      const item = items[idx];
+      if (!item || typeof item !== 'object' || !item._cals1) return; // old items without per-1x — skip
+      const oldQty = item._qty || 1;
+      // Adjust totals: remove old qty contribution, add new qty contribution
+      let micros = { ...(tl.micros || {}) };
+      if (item._micros1) {
+        Object.entries(item._micros1).forEach(([k, v]) => {
+          micros[k] = Math.max(0, +((( micros[k] || 0) - v * oldQty + v * newQty).toFixed(2)));
+        });
+      }
+      const newItem = {
+        ...item,
+        cals:    Math.round(item._cals1    * newQty),
+        protein: Math.round(item._protein1 * newQty * 10) / 10,
+        carbs:   Math.round(item._carbs1   * newQty * 10) / 10,
+        fat:     Math.round(item._fat1     * newQty * 10) / 10,
+        _qty:    newQty,
+      };
+      const newItems = items.map((it, i) => i === idx ? newItem : it);
+      const u = {
+        ...tl,
+        cals:    Math.max(0, Math.round(tl.cals    - item.cals    + newItem.cals)),
+        protein: Math.max(0, Math.round((tl.protein - item.protein + newItem.protein) * 10) / 10),
+        fat:     Math.max(0, Math.round((tl.fat     - item.fat     + newItem.fat    ) * 10) / 10),
+        carbs:   Math.max(0, Math.round((tl.carbs   - item.carbs   + newItem.carbs  ) * 10) / 10),
+        micros,
+        items: newItems,
+      };
+      const nn = [u, ...nutrition.filter(n => n.date !== today)];
+      setNutrition(nn);
+      await sset('nutrition', nn);
+      setLogItemQty({ idx: null, draft: '' });
     };
 
     const addMyFood = (f) => {
@@ -1904,13 +1959,48 @@ function App() {
           ...(tl.items || []).map((item, i) => {
             const name = typeof item === 'object' ? item.name : item;
             const cals = typeof item === 'object' ? item.cals : null;
-            return React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' } },
-              React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t2)' } }, name),
-              cals != null && React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)', marginRight: 10 } }, `${cals} cal`),
-              React.createElement('span', {
-                style: { fontSize: 20, color: 'var(--t3)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 },
-                onClick: () => removeItem(i)
-              }, '×')
+            const canEditQty = typeof item === 'object' && item._cals1 != null;
+            const qty = (typeof item === 'object' && item._qty) || 1;
+            const isEditingQty = logItemQty.idx === i;
+            return React.createElement('div', { key: i, style: { borderBottom: '1px solid var(--border)' } },
+              React.createElement('div', { style: { display: 'flex', alignItems: 'center', padding: '7px 0' } },
+                React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t2)' } }, name),
+                cals != null && React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)', marginRight: 6 } }, `${cals} cal`),
+                // Qty badge — tappable if item has per-1x data
+                canEditQty
+                  ? React.createElement('span', {
+                      style: { fontSize: 11, color: isEditingQty ? 'var(--lime)' : 'var(--blue)', marginRight: 8, cursor: 'pointer', padding: '2px 5px', background: 'var(--border)', borderRadius: 4, fontVariantNumeric: 'tabular-nums' },
+                      onClick: () => isEditingQty
+                        ? setLogItemQty({ idx: null, draft: '' })
+                        : setLogItemQty({ idx: i, draft: String(qty) })
+                    }, `×${qty % 1 === 0 ? qty : qty.toFixed(2)}`)
+                  : null,
+                React.createElement('span', {
+                  style: { fontSize: 20, color: 'var(--t3)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 },
+                  onClick: () => { setLogItemQty({ idx: null, draft: '' }); removeItem(i); }
+                }, '×')
+              ),
+              // Inline qty editor
+              isEditingQty && React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8 } },
+                React.createElement('button', {
+                  style: { width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--t1)', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+                  onClick: () => setLogItemQty(s => ({ ...s, draft: String(Math.max(0.25, +(parseFloat(s.draft || qty) - 0.5).toFixed(2))) }))
+                }, '−'),
+                React.createElement('input', {
+                  type: 'number', min: '0.25', step: '0.5',
+                  value: logItemQty.draft,
+                  onChange: e => setLogItemQty(s => ({ ...s, draft: e.target.value })),
+                  style: { flex: 1, textAlign: 'center', background: 'var(--bg2)', border: '1px solid var(--lime)', borderRadius: 6, color: 'var(--t1)', fontSize: 15, height: 32, outline: 'none' }
+                }),
+                React.createElement('button', {
+                  style: { width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--t1)', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+                  onClick: () => setLogItemQty(s => ({ ...s, draft: String(+(parseFloat(s.draft || qty) + 0.5).toFixed(2)) }))
+                }, '+'),
+                React.createElement('button', {
+                  style: { height: 32, padding: '0 12px', borderRadius: 6, border: 'none', background: 'var(--lime)', color: '#000', fontSize: 13, fontWeight: 700, cursor: 'pointer', flexShrink: 0 },
+                  onClick: () => updateItemQty(i, logItemQty.draft)
+                }, '✓')
+              )
             );
           })
         ),
