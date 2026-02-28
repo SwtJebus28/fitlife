@@ -1421,7 +1421,11 @@ function App() {
 
     const saveToMyFoods = (raw) => {
       setMyFoods(prev => {
-        const existing = raw.barcode ? prev.findIndex(f => f.barcode && f.barcode === raw.barcode) : -1;
+        const existing = raw.barcode
+          ? prev.findIndex(f => f.barcode && f.barcode === raw.barcode)
+          : raw.fdcId
+            ? prev.findIndex(f => f.fdcId && f.fdcId === raw.fdcId)
+            : -1;
         let next;
         if (existing >= 0) {
           next = prev.map((f, i) => i === existing ? { ...f, defaultGrams: raw.defaultGrams } : f);
@@ -1748,6 +1752,8 @@ function App() {
         label = `${customAmt}${customUnit}`;
       }
       add({ name: `${c.name} (${label})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
+      // Auto-save to My Foods (deduplicates by fdcId so re-adds just update defaultGrams)
+      saveToMyFoods({ name: selectedFood.name, cals100: selectedFood.cals100, protein100: selectedFood.protein100, carbs100: selectedFood.carbs100, fat100: selectedFood.fat100, defaultGrams: preview.grams, micros100: {}, fdcId: selectedFood.fdcId || null, barcode: null });
       // Abort any in-flight measures fetch so it can't corrupt subsequent searches
       if (measuresCtrlRef.current) { measuresCtrlRef.current.abort(); measuresCtrlRef.current = null; }
       setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
