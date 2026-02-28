@@ -1629,6 +1629,48 @@ function App() {
     // Qty editor state for Logged Today items
     const [logItemQty, setLogItemQty] = React.useState({ idx: null, draft: '' });
 
+    // Nutrient drill-down detail panel
+    const [nutrientDetail, setNutrientDetail] = React.useState(null); // null | { key, label, unit, rda, color }
+
+    const buildSources = (key) => {
+      const MACRO_KEYS = { cals: 'cals', protein: 'protein', carbs: 'carbs', fat: 'fat' };
+      const isMacro = !!MACRO_KEYS[key];
+      const sources = [];
+      // Food items
+      (tl.items || []).forEach(item => {
+        if (typeof item !== 'object') return;
+        let val = isMacro ? (item[key] || 0) : ((item._micros1 && item._micros1[key]) ? item._micros1[key] * (item._qty || 1) : null);
+        if (val != null && val > 0) sources.push({ name: item.name, val });
+      });
+      // Checked-in supplements
+      if (tl.supps) {
+        Object.entries(tl.supps).forEach(([id, checked]) => {
+          if (!checked) return;
+          const s = suppStack.find(x => String(x.id) === String(id));
+          if (!s) return;
+          let val = null;
+          if (isMacro && s.isMacro) {
+            const scale = (parseFloat(s.defaultGrams) || 0) / 100;
+            if (key === 'cals')    val = Math.round((s.cals100    || 0) * scale);
+            if (key === 'protein') val = Math.round((s.protein100 || 0) * scale * 10) / 10;
+            if (key === 'carbs')   val = Math.round((s.carbs100   || 0) * scale * 10) / 10;
+            if (key === 'fat')     val = Math.round((s.fat100     || 0) * scale * 10) / 10;
+          } else if (!isMacro && s.micros && s.micros[key] != null) {
+            val = s.micros[key];
+          }
+          if (val != null && val > 0) sources.push({ name: s.name, val, isSupp: true });
+        });
+      }
+      sources.sort((a, b) => b.val - a.val);
+      // Compute unaccounted gap (old food items that don't store per-item micros)
+      const accounted = sources.reduce((sum, s) => sum + s.val, 0);
+      const total = isMacro
+        ? (tl[key] || 0)
+        : ((tl.micros || {})[key] || 0);
+      const gap = Math.round((total - accounted) * 100) / 100;
+      return { sources, gap: gap > 0.01 ? gap : 0 };
+    };
+
     const updateItemQty = async (idx, newQtyRaw) => {
       const newQty = Math.max(0.25, parseFloat(newQtyRaw) || 1);
       const items = tl.items || [];
@@ -2008,11 +2050,11 @@ function App() {
             ))
           ),
           ...[
-            { name: 'Protein', val: tl.protein, max: USER.protein, bg: 'var(--blue)' },
-            { name: 'Carbs',   val: tl.carbs,   max: USER.carbs,   bg: 'var(--purple)' },
-            { name: 'Fat',     val: tl.fat,      max: USER.fat,     bg: 'var(--amber)' },
+            { key: 'protein', name: 'Protein', val: tl.protein, max: USER.protein, bg: 'var(--blue)',   unit: 'g' },
+            { key: 'carbs',   name: 'Carbs',   val: tl.carbs,   max: USER.carbs,   bg: 'var(--purple)', unit: 'g' },
+            { key: 'fat',     name: 'Fat',     val: tl.fat,      max: USER.fat,     bg: 'var(--amber)',  unit: 'g' },
           ].map(m => React.createElement('div', { key: m.name, className: 'mr' },
-            React.createElement('span', { className: 'mn' }, m.name),
+            React.createElement('span', { className: 'mn', style: { cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }, onClick: () => setNutrientDetail({ key: m.key, label: m.name, unit: m.unit, rda: m.max, color: m.bg }) }, m.name),
             React.createElement('div', { className: 'mb' },
               React.createElement('div', { className: 'mf', style: { width: `${Math.min(m.val / m.max * 100, 100)}%`, background: m.bg } })
             ),
@@ -2031,7 +2073,7 @@ function App() {
             const dispVal = m.unit === 'g' ? val.toFixed(1) : m.unit === 'mcg' && m.rda < 10 ? val.toFixed(2) : Math.round(val);
             const dispRda = m.unit === 'g' ? m.rda.toFixed(0) : m.rda;
             return React.createElement('div', { key: m.key, className: 'mr', style: { marginBottom: 6 } },
-              React.createElement('span', { className: 'mn', style: { color: pct >= 100 ? m.color : 'var(--t2)' } }, m.label),
+              React.createElement('span', { className: 'mn', style: { color: pct >= 100 ? m.color : 'var(--t2)', cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }, onClick: () => setNutrientDetail({ key: m.key, label: m.label, unit: m.unit, rda: m.rda, color: m.color }) }, m.label),
               React.createElement('div', { className: 'mb' },
                 React.createElement('div', { className: 'mf', style: { width: `${pct}%`, background: m.color, opacity: pct >= 100 ? 1 : 0.75 } })
               ),
@@ -2558,7 +2600,60 @@ function App() {
         )
       ),
 
-      React.createElement('div', { className: 'gap' })
+      React.createElement('div', { className: 'gap' }),
+
+      // ── Nutrient detail modal ─────────────────────────────────
+      nutrientDetail && (() => {
+        const { key, label, unit, rda, color } = nutrientDetail;
+        const isMacro = ['cals','protein','carbs','fat'].includes(key);
+        const total = isMacro ? (tl[key] || 0) : ((tl.micros || {})[key] || 0);
+        const { sources, gap } = buildSources(key);
+        const fmt = v => unit === 'g' ? +v.toFixed(1) : unit === 'mcg' && rda < 10 ? +v.toFixed(2) : Math.round(v);
+        const dispTotal = fmt(total);
+        const dispRda   = unit === 'g' ? rda.toFixed(0) : rda;
+        return React.createElement('div', {
+          style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 2000, display: 'flex', alignItems: 'flex-end' },
+          onClick: () => setNutrientDetail(null)
+        },
+          React.createElement('div', {
+            style: { width: '100%', background: 'var(--surface)', borderRadius: '16px 16px 0 0', padding: '20px 20px 36px', maxHeight: '65vh', overflowY: 'auto' },
+            onClick: e => e.stopPropagation()
+          },
+            // Header
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 } },
+              React.createElement('div', null,
+                React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 22, color: color, lineHeight: 1 } }, label),
+                React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', marginTop: 4 } },
+                  `${dispTotal} / ${dispRda}${unit}  ·  ${Math.round(total / rda * 100)}% of daily goal`
+                )
+              ),
+              React.createElement('span', { style: { fontSize: 22, color: 'var(--t3)', cursor: 'pointer', lineHeight: 1, padding: '0 4px' }, onClick: () => setNutrientDetail(null) }, '×')
+            ),
+            // Progress bar
+            React.createElement('div', { className: 'mb', style: { marginBottom: 16 } },
+              React.createElement('div', { className: 'mf', style: { width: `${Math.min(total / rda * 100, 100)}%`, background: color } })
+            ),
+            // Sources list
+            sources.length === 0 && gap === 0
+              ? React.createElement('div', { style: { fontSize: 13, color: 'var(--t3)', textAlign: 'center', padding: '12px 0' } }, 'Nothing logged yet today')
+              : React.createElement(React.Fragment, null,
+                  ...sources.map((s, i) => React.createElement('div', {
+                    key: i,
+                    style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }
+                  },
+                    s.isSupp && React.createElement('span', { style: { fontSize: 10, color: 'var(--lime)', border: '1px solid var(--lime)', borderRadius: 3, padding: '1px 4px', marginRight: 7, flexShrink: 0 } }, 'SUPP'),
+                    React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t2)' } }, s.name),
+                    React.createElement('span', { style: { fontSize: 13, color: color, fontFamily: 'var(--fm)', marginLeft: 10, flexShrink: 0 } }, `${fmt(s.val)}${unit}`)
+                  )),
+                  // Gap row for unaccounted older items
+                  gap > 0 && React.createElement('div', { style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' } },
+                    React.createElement('span', { style: { flex: 1, fontSize: 12, color: 'var(--t3)', fontStyle: 'italic' } }, 'Other sources (logged before this update)'),
+                    React.createElement('span', { style: { fontSize: 13, color: 'var(--t3)', fontFamily: 'var(--fm)', marginLeft: 10 } }, `${fmt(gap)}${unit}`)
+                  )
+                )
+          )
+        );
+      })()
     );
   }
   </script>
