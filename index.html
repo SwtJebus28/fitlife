@@ -1551,13 +1551,19 @@ function App() {
           protein: Math.round((u.protein + (supp.protein100 || 0) * scale) * 10) / 10,
           carbs:   Math.round((u.carbs   + (supp.carbs100   || 0) * scale) * 10) / 10,
           fat:     Math.round((u.fat     + (supp.fat100     || 0) * scale) * 10) / 10,
-          items: [...(u.items || []), {
-            name: `${supp.name} (${g}${supp.defaultUnit || 'g'})`,
-            cals:    Math.round((supp.cals100    || 0) * scale),
-            protein: Math.round((supp.protein100 || 0) * scale * 10) / 10,
-            carbs:   Math.round((supp.carbs100   || 0) * scale * 10) / 10,
-            fat:     Math.round((supp.fat100     || 0) * scale * 10) / 10,
-          }],
+          items: [...(u.items || []), (() => {
+            const c = Math.round((supp.cals100    || 0) * scale);
+            const p = Math.round((supp.protein100 || 0) * scale * 10) / 10;
+            const cb= Math.round((supp.carbs100   || 0) * scale * 10) / 10;
+            const ft= Math.round((supp.fat100     || 0) * scale * 10) / 10;
+            return {
+              name: `${supp.name} (${g}${supp.defaultUnit || 'g'})`,
+              cals: c, protein: p, carbs: cb, fat: ft,
+              _cals1: c, _protein1: p, _carbs1: cb, _fat1: ft,
+              _micros1: supp.micros ? { ...supp.micros } : {},
+              _qty: 1,
+            };
+          })()],
         };
       }
       // Micronutrients: add on check, subtract on uncheck
