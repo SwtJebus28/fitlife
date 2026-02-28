@@ -1416,7 +1416,8 @@ function App() {
     // My Foods
     const [myFoods, setMyFoods] = React.useState(_getMyFoods);
     const [editingFoodId, setEditingFoodId] = React.useState(null);
-    const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '' });
+    const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '', cals100: '', protein100: '', carbs100: '', fat100: '', fiber: '', vitD: '', vitK: '', omega3: '', magnesium: '', calcium: '', zinc: '', b12: '', vitC: '', potassium: '' });
+    const [editShowMicros, setEditShowMicros] = React.useState(false);
 
     const saveToMyFoods = (raw) => {
       setMyFoods(prev => {
@@ -1546,16 +1547,57 @@ function App() {
     };
 
     const startEditFood = (f) => {
+      const m = f.micros100 || {};
+      setEditDraft({
+        name: f.name,
+        defaultGrams: String(f.defaultGrams || 100),
+        cals100:    String(f.cals100    ?? ''),
+        protein100: String(f.protein100 ?? ''),
+        carbs100:   String(f.carbs100   ?? ''),
+        fat100:     String(f.fat100     ?? ''),
+        fiber:      String(m.fiber      ?? ''),
+        vitD:       String(m.vitD       ?? ''),
+        vitK:       String(m.vitK       ?? ''),
+        omega3:     String(m.omega3     ?? ''),
+        magnesium:  String(m.magnesium  ?? ''),
+        calcium:    String(m.calcium    ?? ''),
+        zinc:       String(m.zinc       ?? ''),
+        b12:        String(m.b12        ?? ''),
+        vitC:       String(m.vitC       ?? ''),
+        potassium:  String(m.potassium  ?? ''),
+      });
+      setEditShowMicros(false);
       setEditingFoodId(f.id);
-      setEditDraft({ name: f.name, defaultGrams: String(f.defaultGrams || 100) });
     };
     const saveEditFood = (id) => {
       setMyFoods(prev => {
-        const next = prev.map(f => f.id === id ? {
-          ...f,
-          name: editDraft.name.trim() || f.name,
-          defaultGrams: parseFloat(editDraft.defaultGrams) || f.defaultGrams,
-        } : f);
+        const next = prev.map(f => {
+          if (f.id !== id) return f;
+          const p = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+          const micros100 = {
+            ...(f.micros100 || {}),
+            ...(p(editDraft.fiber)     != null ? { fiber:     p(editDraft.fiber)     } : {}),
+            ...(p(editDraft.vitD)      != null ? { vitD:      p(editDraft.vitD)      } : {}),
+            ...(p(editDraft.vitK)      != null ? { vitK:      p(editDraft.vitK)      } : {}),
+            ...(p(editDraft.omega3)    != null ? { omega3:    p(editDraft.omega3)    } : {}),
+            ...(p(editDraft.magnesium) != null ? { magnesium: p(editDraft.magnesium) } : {}),
+            ...(p(editDraft.calcium)   != null ? { calcium:   p(editDraft.calcium)   } : {}),
+            ...(p(editDraft.zinc)      != null ? { zinc:      p(editDraft.zinc)      } : {}),
+            ...(p(editDraft.b12)       != null ? { b12:       p(editDraft.b12)       } : {}),
+            ...(p(editDraft.vitC)      != null ? { vitC:      p(editDraft.vitC)      } : {}),
+            ...(p(editDraft.potassium) != null ? { potassium: p(editDraft.potassium) } : {}),
+          };
+          return {
+            ...f,
+            name:       editDraft.name.trim() || f.name,
+            defaultGrams: p(editDraft.defaultGrams) || f.defaultGrams,
+            cals100:    p(editDraft.cals100)    ?? f.cals100    ?? 0,
+            protein100: p(editDraft.protein100) ?? f.protein100 ?? 0,
+            carbs100:   p(editDraft.carbs100)   ?? f.carbs100   ?? 0,
+            fat100:     p(editDraft.fat100)     ?? f.fat100     ?? 0,
+            micros100,
+          };
+        });
         _saveMyFoodsLS(next);
         return next;
       });
@@ -1893,74 +1935,102 @@ function App() {
             onClick: () => { setLabelScanMode('food'); setShowLabelScanner(true); }
           }, '📸 Scan Label')
         ),
-        // Quick Add card — My Foods + presets combined, sorted alphabetically
-        React.createElement('div', { className: 'card' },
-          React.createElement('div', { className: 'clbl' }, 'Quick Add'),
-          React.createElement('div', { style: { maxHeight: 220, overflowY: 'auto' } },
-            ...[
-              ...myFoods.map(f => ({ ...f, _type: 'my', _cal: Math.round(f.cals100 * f.defaultGrams / 100) })),
-              ...FOODS.map(f => ({ ...f, _type: 'preset', _cal: f.cals }))
-            ]
-            .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-            .map((f, i, arr) => {
-              const isEditing = f._type === 'my' && editingFoodId === f.id;
-              const borderStyle = i < arr.length - 1 ? '1px solid var(--border)' : 'none';
-              if (isEditing) {
-                return React.createElement('div', { key: `${f._type}-${f.name}-${i}`, style: { padding: '8px 0', borderBottom: borderStyle } },
-                  React.createElement('div', { style: { display: 'flex', gap: 6, marginBottom: 6 } },
-                    React.createElement('input', {
-                      className: 'inp', style: { flex: 1, fontSize: 13 },
-                      value: editDraft.name, onChange: e => setEditDraft(p => ({ ...p, name: e.target.value })),
-                      autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false,
-                      placeholder: 'Name'
-                    })
-                  ),
-                  React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-                    React.createElement('label', { style: { fontSize: 11, color: 'var(--t3)', whiteSpace: 'nowrap' } }, 'Serving (g)'),
-                    React.createElement('input', {
-                      className: 'inp', type: 'number', inputMode: 'decimal',
-                      style: { width: 70, fontSize: 13 },
-                      value: editDraft.defaultGrams, onChange: e => setEditDraft(p => ({ ...p, defaultGrams: e.target.value }))
-                    }),
-                    React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)' } },
-                      editDraft.defaultGrams && f.cals100
-                        ? `≈ ${Math.round(f.cals100 * (parseFloat(editDraft.defaultGrams) || 0) / 100)} cal`
-                        : ''
-                    ),
-                    React.createElement('button', {
-                      className: 'btn', style: { padding: '4px 12px', fontSize: 13, marginLeft: 'auto' },
-                      onClick: () => saveEditFood(f.id)
-                    }, '✓'),
-                    React.createElement('button', {
-                      className: 'btn ghost', style: { padding: '4px 10px', fontSize: 13 },
-                      onClick: () => setEditingFoodId(null)
-                    }, '✕')
-                  )
-                );
-              }
-              return React.createElement('div', {
-                key: `${f._type}-${f.name}-${i}`,
-                style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: borderStyle }
-              },
-                React.createElement('span', {
-                  style: { flex: 1, fontSize: 13, color: 'var(--t2)', cursor: 'pointer' },
-                  onClick: () => f._type === 'my' ? addMyFood(f) : add(f)
-                },
-                  '+ ', f.name,
-                  React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 6 } }, `${f._cal} cal`)
-                ),
-                f._type === 'my' && React.createElement('span', {
-                  style: { fontSize: 15, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
-                  onClick: () => startEditFood(f)
-                }, '✏️'),
-                f._type === 'my' && React.createElement('span', {
-                  style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
-                  onClick: () => removeFromMyFoods(f.id)
-                }, '×')
+        // Quick Add card — list view OR full edit form
+        editingFoodId
+          ? (() => {
+              const ef = myFoods.find(f => f.id === editingFoodId);
+              if (!ef) return null;
+              const calPreview = parseFloat(editDraft.cals100) > 0 && parseFloat(editDraft.defaultGrams) > 0
+                ? Math.round(parseFloat(editDraft.cals100) * parseFloat(editDraft.defaultGrams) / 100)
+                : null;
+              const inp = (key, label, unit, step) => React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                React.createElement('label', { className: 'ilbl' }, `${label}${unit ? ` (${unit})` : ''}`),
+                React.createElement('input', {
+                  className: 'inp', type: 'number', inputMode: 'decimal', step: step || 'any', placeholder: '0',
+                  value: editDraft[key], onChange: e => setEditDraft(p => ({ ...p, [key]: e.target.value }))
+                })
               );
-            })
-          )
-        ),
+              return React.createElement('div', { className: 'card' },
+                // Header
+                React.createElement('div', { style: { display: 'flex', alignItems: 'center', marginBottom: 10 } },
+                  React.createElement('div', { className: 'clbl', style: { margin: 0, flex: 1 } }, '✏️ Edit Food'),
+                  calPreview != null && React.createElement('span', { style: { fontSize: 12, color: 'var(--lime)', marginRight: 8 } }, `≈ ${calPreview} cal/serving`)
+                ),
+                // Name
+                React.createElement('div', { className: 'ig' },
+                  React.createElement('label', { className: 'ilbl' }, 'Name'),
+                  React.createElement('input', {
+                    className: 'inp', autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false,
+                    value: editDraft.name, onChange: e => setEditDraft(p => ({ ...p, name: e.target.value }))
+                  })
+                ),
+                // Serving
+                React.createElement('div', { className: 'ig' },
+                  React.createElement('label', { className: 'ilbl' }, 'Default Serving (g)'),
+                  React.createElement('input', {
+                    className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '100',
+                    value: editDraft.defaultGrams, onChange: e => setEditDraft(p => ({ ...p, defaultGrams: e.target.value }))
+                  })
+                ),
+                // Macros per 100g
+                React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', margin: '10px 0 4px', textTransform: 'uppercase', letterSpacing: '0.06em' } }, 'Macros per 100g'),
+                React.createElement('div', { style: { display: 'flex', gap: 8 } }, inp('cals100', 'Calories', 'kcal'), inp('protein100', 'Protein', 'g')),
+                React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('carbs100', 'Carbs', 'g'), inp('fat100', 'Fat', 'g')),
+                // Micros — collapsible
+                React.createElement('div', {
+                  style: { display: 'flex', alignItems: 'center', cursor: 'pointer', margin: '12px 0 4px', userSelect: 'none' },
+                  onClick: () => setEditShowMicros(v => !v)
+                },
+                  React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 } }, 'Micronutrients per 100g'),
+                  React.createElement('span', { style: { fontSize: 12, color: 'var(--t3)' } }, editShowMicros ? '▾' : '▸')
+                ),
+                editShowMicros && React.createElement(React.Fragment, null,
+                  React.createElement('div', { style: { display: 'flex', gap: 8 } },           inp('fiber', 'Fiber', 'g'), inp('vitD', 'Vit D', 'IU')),
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('vitK', 'Vit K', 'mcg'), inp('omega3', 'Omega-3', 'mg')),
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('magnesium', 'Magnesium', 'mg'), inp('calcium', 'Calcium', 'mg')),
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('zinc', 'Zinc', 'mg', '0.1'), inp('b12', 'B12', 'mcg', '0.01')),
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('vitC', 'Vit C', 'mg'), inp('potassium', 'Potassium', 'mg'))
+                ),
+                // Save / Cancel
+                React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 14 } },
+                  React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => setEditingFoodId(null) }, 'Cancel'),
+                  React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center', fontSize: 13 }, onClick: () => saveEditFood(editingFoodId) }, 'Save')
+                )
+              );
+            })()
+          : React.createElement('div', { className: 'card' },
+              React.createElement('div', { className: 'clbl' }, 'Quick Add'),
+              React.createElement('div', { style: { maxHeight: 220, overflowY: 'auto' } },
+                ...[
+                  ...myFoods.map(f => ({ ...f, _type: 'my', _cal: Math.round(f.cals100 * f.defaultGrams / 100) })),
+                  ...FOODS.map(f => ({ ...f, _type: 'preset', _cal: f.cals }))
+                ]
+                .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+                .map((f, i, arr) => {
+                  const borderStyle = i < arr.length - 1 ? '1px solid var(--border)' : 'none';
+                  return React.createElement('div', {
+                    key: `${f._type}-${f.name}-${i}`,
+                    style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: borderStyle }
+                  },
+                    React.createElement('span', {
+                      style: { flex: 1, fontSize: 13, color: 'var(--t2)', cursor: 'pointer' },
+                      onClick: () => f._type === 'my' ? addMyFood(f) : add(f)
+                    },
+                      '+ ', f.name,
+                      React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 6 } }, `${f._cal} cal`)
+                    ),
+                    f._type === 'my' && React.createElement('span', {
+                      style: { fontSize: 15, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
+                      onClick: () => startEditFood(f)
+                    }, '✏️'),
+                    f._type === 'my' && React.createElement('span', {
+                      style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
+                      onClick: () => removeFromMyFoods(f.id)
+                    }, '×')
+                  );
+                })
+              )
+            ),
         // Custom Entry card with smart search
         React.createElement('div', { className: 'card' },
           React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
