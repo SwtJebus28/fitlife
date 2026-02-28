@@ -2651,10 +2651,16 @@ function App() {
                     React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t2)' } }, s.name),
                     React.createElement('span', { style: { fontSize: 13, color: color, fontFamily: 'var(--fm)', marginLeft: 10, flexShrink: 0 } }, `${fmt(s.val)}${unit}`)
                   )),
-                  // Gap row for unaccounted older items
+                  // Gap row — items that predate per-nutrient tracking
                   gap > 0 && React.createElement('div', { style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' } },
-                    React.createElement('span', { style: { flex: 1, fontSize: 12, color: 'var(--t3)', fontStyle: 'italic' } }, 'Other sources (logged before this update)'),
-                    React.createElement('span', { style: { fontSize: 13, color: 'var(--t3)', fontFamily: 'var(--fm)', marginLeft: 10 } }, `${fmt(gap)}${unit}`)
+                    React.createElement('span', { style: { fontSize: 11, color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 3, padding: '1px 4px', marginRight: 7, flexShrink: 0 } }, 'OLD'),
+                    React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t2)' } }, 'Other items (no per-nutrient data)'),
+                    React.createElement('span', { style: { fontSize: 13, color: color, fontFamily: 'var(--fm)', marginLeft: 10, flexShrink: 0 } }, `${fmt(gap)}${unit}`)
+                  ),
+                  // Total row
+                  React.createElement('div', { style: { display: 'flex', alignItems: 'center', padding: '10px 0 2px', marginTop: 2 } },
+                    React.createElement('span', { style: { flex: 1, fontSize: 13, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 11 } }, 'Total'),
+                    React.createElement('span', { style: { fontSize: 14, color: 'var(--text)', fontFamily: 'var(--fm)', fontWeight: 700, marginLeft: 10, flexShrink: 0 } }, `${dispTotal}${unit}`)
                   )
                 )
           )
