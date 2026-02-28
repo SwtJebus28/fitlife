@@ -1240,8 +1240,8 @@ function App() {
             messages: [{ role: 'user', content: [
               { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
               { type: 'text', text: mode === 'supp'
-                ? 'This is a Supplement Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":1,"cals100":0,"protein100":0,"carbs100":0,"fat100":0,"micros_per_serving":{"fiber":0,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":0,"potassium":0}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using the serving size). For capsules/softgels/tablets use serving_g=1. micros_per_serving units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA in mg, magnesium/calcium/zinc/vitC/potassium=mg, b12=mcg. Use 0 for any not listed.'
-                : 'This is a Nutrition Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":140,"cals100":50,"protein100":1,"carbs100":12,"fat100":0,"micros_per_serving":{"fiber":5,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":15,"potassium":150}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using serving size). micros_per_serving contains the actual per-serving amounts printed on the label. IMPORTANT: "Dietary Fiber" is listed as an INDENTED sub-row under "Total Carbohydrate" — you MUST capture it (e.g. if label shows Total Carbohydrate 17g / Dietary Fiber 5g, return fiber:5). Units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA mg, magnesium/calcium/zinc/vitC/potassium=mg, b12=mcg. Use 0 only if truly absent from the label.'
+                ? 'This is a Supplement Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":1,"cals100":0,"protein100":0,"carbs100":0,"fat100":0,"micros_per_serving":{"fiber":0,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":0,"potassium":0,"iron":0,"niacin":0,"vitE":0}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using the serving size). For capsules/softgels/tablets use serving_g=1. micros_per_serving units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA in mg, magnesium/calcium/zinc/vitC/potassium/iron/niacin/vitE=mg, b12=mcg. Use 0 for any not listed.'
+                : 'This is a Nutrition Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":140,"cals100":50,"protein100":1,"carbs100":12,"fat100":0,"micros_per_serving":{"fiber":5,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":15,"potassium":150,"iron":2,"niacin":0,"vitE":0}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using serving size). micros_per_serving contains the actual per-serving amounts printed on the label. IMPORTANT: "Dietary Fiber" is listed as an INDENTED sub-row under "Total Carbohydrate" — you MUST capture it (e.g. if label shows Total Carbohydrate 17g / Dietary Fiber 5g, return fiber:5). Units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA mg, magnesium/calcium/zinc/vitC/potassium/iron/niacin/vitE=mg, b12=mcg. Use 0 only if truly absent from the label.'
               }
             ]}],
           }),
@@ -1381,6 +1381,9 @@ function App() {
     { key: 'b12',       label: 'Vitamin B12', unit: 'mcg', rda: 2.4,  color: '#6ee7b7' },
     { key: 'vitC',      label: 'Vitamin C',   unit: 'mg',  rda: 90,   color: '#c8f135' },
     { key: 'potassium', label: 'Potassium',   unit: 'mg',  rda: 3400, color: '#fda4af' },
+    { key: 'iron',      label: 'Iron',        unit: 'mg',  rda: 8,    color: '#f87171' },
+    { key: 'niacin',    label: 'Niacin (B3)', unit: 'mg',  rda: 16,   color: '#e879f9' },
+    { key: 'vitE',      label: 'Vitamin E',   unit: 'mg',  rda: 15,   color: '#fbbf24' },
   ];
 
   const RECOMMENDED_SUPPS = [
@@ -1419,7 +1422,7 @@ function App() {
     // My Foods
     const [myFoods, setMyFoods] = React.useState(_getMyFoods);
     const [editingFoodId, setEditingFoodId] = React.useState(null);
-    const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '', cals: '', protein: '', carbs: '', fat: '', fiber: '', vitD: '', vitK: '', omega3: '', magnesium: '', calcium: '', zinc: '', b12: '', vitC: '', potassium: '' });
+    const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '', cals: '', protein: '', carbs: '', fat: '', fiber: '', vitD: '', vitK: '', omega3: '', magnesium: '', calcium: '', zinc: '', b12: '', vitC: '', potassium: '', iron: '', niacin: '', vitE: '' });
     const [editShowMicros, setEditShowMicros] = React.useState(false);
 
     const saveToMyFoods = (raw) => {
@@ -1485,6 +1488,9 @@ function App() {
         b12:        m.b12       != null ? String(m.b12)       : '',
         vitC:       m.vitC      != null ? String(m.vitC)      : '',
         potassium:  m.potassium != null ? String(m.potassium) : '',
+        iron:       m.iron      != null ? String(m.iron)      : '',
+        niacin:     m.niacin    != null ? String(m.niacin)    : '',
+        vitE:       m.vitE      != null ? String(m.vitE)      : '',
       });
       setSuppEditShowMicros(false);
       setEditingSuppId(s.id);
@@ -1503,7 +1509,8 @@ function App() {
           const toM = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
           const micros = {};
           [['fiber', toM], ['vitD', toM], ['vitK', toM], ['omega3', toM],
-           ['magnesium', toM], ['calcium', toM], ['zinc', toM], ['b12', toM], ['vitC', toM], ['potassium', toM]
+           ['magnesium', toM], ['calcium', toM], ['zinc', toM], ['b12', toM], ['vitC', toM], ['potassium', toM],
+           ['iron', toM], ['niacin', toM], ['vitE', toM],
           ].forEach(([k, fn]) => { const v = fn(suppEditDraft[k]); if (v != null) micros[k] = v; });
           const isMacro = suppEditDraft.isMacro;
           const c = isMacro ? toH(suppEditDraft.cals)    : null;
@@ -1704,6 +1711,9 @@ function App() {
         b12:         srv(m.b12,        2),
         vitC:        srv(m.vitC),
         potassium:   srv(m.potassium),
+        iron:        srv(m.iron,       1),
+        niacin:      srv(m.niacin,     1),
+        vitE:        srv(m.vitE,       1),
       });
       setEditShowMicros(false);
       setEditingFoodId(f.id);
@@ -1718,7 +1728,8 @@ function App() {
           const micros100 = { ...(f.micros100 || {}) };
           [['fiber', v => +v.toFixed(1)], ['vitD', Math.round], ['vitK', v => +v.toFixed(1)],
            ['omega3', Math.round], ['magnesium', Math.round], ['calcium', Math.round],
-           ['zinc', v => +v.toFixed(1)], ['b12', v => +v.toFixed(2)], ['vitC', Math.round], ['potassium', Math.round]
+           ['zinc', v => +v.toFixed(1)], ['b12', v => +v.toFixed(2)], ['vitC', Math.round], ['potassium', Math.round],
+           ['iron', v => +v.toFixed(1)], ['niacin', v => +v.toFixed(1)], ['vitE', v => +v.toFixed(1)],
           ].forEach(([k, fmt]) => { const v = toH(editDraft[k]); if (v != null) micros100[k] = fmt(v); });
           const c = toH(editDraft.cals), p = toH(editDraft.protein),
                 cb = toH(editDraft.carbs), ft = toH(editDraft.fat);
@@ -2160,7 +2171,9 @@ function App() {
                   React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('vitK', 'Vit K', 'mcg'), inp('omega3', 'Omega-3', 'mg')),
                   React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('magnesium', 'Magnesium', 'mg'), inp('calcium', 'Calcium', 'mg')),
                   React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('zinc', 'Zinc', 'mg', '0.1'), inp('b12', 'B12', 'mcg', '0.01')),
-                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('vitC', 'Vit C', 'mg'), inp('potassium', 'Potassium', 'mg'))
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('vitC', 'Vit C', 'mg'), inp('potassium', 'Potassium', 'mg')),
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('iron', 'Iron', 'mg', '0.1'), inp('niacin', 'Niacin B3', 'mg', '0.1')),
+                  React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, inp('vitE', 'Vit E', 'mg', '0.1'))
                 ),
                 // Save / Cancel
                 React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 14 } },
@@ -2354,6 +2367,8 @@ function App() {
                 { key: 'magnesium', label: 'Magnesium', unit: 'mg' }, { key: 'calcium', label: 'Calcium', unit: 'mg' },
                 { key: 'zinc',  label: 'Zinc',  unit: 'mg' }, { key: 'b12',   label: 'B12',   unit: 'mcg' },
                 { key: 'vitC',  label: 'Vit C', unit: 'mg' }, { key: 'potassium', label: 'Potassium', unit: 'mg' },
+                { key: 'iron',  label: 'Iron',  unit: 'mg' }, { key: 'niacin', label: 'Niacin B3', unit: 'mg' },
+                { key: 'vitE',  label: 'Vit E', unit: 'mg' },
               ];
               return React.createElement('div', { className: 'card', style: { marginTop: 10 } },
                 // Header
