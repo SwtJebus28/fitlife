@@ -1415,6 +1415,8 @@ function App() {
 
     // My Foods
     const [myFoods, setMyFoods] = React.useState(_getMyFoods);
+    const [editingFoodId, setEditingFoodId] = React.useState(null);
+    const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '' });
 
     const saveToMyFoods = (raw) => {
       setMyFoods(prev => {
@@ -1541,6 +1543,23 @@ function App() {
         fat: Math.round(f.fat100 * scale * 10) / 10,
         micros,
       });
+    };
+
+    const startEditFood = (f) => {
+      setEditingFoodId(f.id);
+      setEditDraft({ name: f.name, defaultGrams: String(f.defaultGrams || 100) });
+    };
+    const saveEditFood = (id) => {
+      setMyFoods(prev => {
+        const next = prev.map(f => f.id === id ? {
+          ...f,
+          name: editDraft.name.trim() || f.name,
+          defaultGrams: parseFloat(editDraft.defaultGrams) || f.defaultGrams,
+        } : f);
+        _saveMyFoodsLS(next);
+        return next;
+      });
+      setEditingFoodId(null);
     };
 
     // Smart search
@@ -1868,22 +1887,63 @@ function App() {
               ...FOODS.map(f => ({ ...f, _type: 'preset', _cal: f.cals }))
             ]
             .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-            .map((f, i, arr) => React.createElement('div', {
-              key: `${f._type}-${f.name}-${i}`,
-              style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }
-            },
-              React.createElement('span', {
-                style: { flex: 1, fontSize: 13, color: 'var(--t2)', cursor: 'pointer' },
-                onClick: () => f._type === 'my' ? addMyFood(f) : add(f)
+            .map((f, i, arr) => {
+              const isEditing = f._type === 'my' && editingFoodId === f.id;
+              const borderStyle = i < arr.length - 1 ? '1px solid var(--border)' : 'none';
+              if (isEditing) {
+                return React.createElement('div', { key: `${f._type}-${f.name}-${i}`, style: { padding: '8px 0', borderBottom: borderStyle } },
+                  React.createElement('div', { style: { display: 'flex', gap: 6, marginBottom: 6 } },
+                    React.createElement('input', {
+                      className: 'inp', style: { flex: 1, fontSize: 13 },
+                      value: editDraft.name, onChange: e => setEditDraft(p => ({ ...p, name: e.target.value })),
+                      autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false,
+                      placeholder: 'Name'
+                    })
+                  ),
+                  React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                    React.createElement('label', { style: { fontSize: 11, color: 'var(--t3)', whiteSpace: 'nowrap' } }, 'Serving (g)'),
+                    React.createElement('input', {
+                      className: 'inp', type: 'number', inputMode: 'decimal',
+                      style: { width: 70, fontSize: 13 },
+                      value: editDraft.defaultGrams, onChange: e => setEditDraft(p => ({ ...p, defaultGrams: e.target.value }))
+                    }),
+                    React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)' } },
+                      editDraft.defaultGrams && f.cals100
+                        ? `≈ ${Math.round(f.cals100 * (parseFloat(editDraft.defaultGrams) || 0) / 100)} cal`
+                        : ''
+                    ),
+                    React.createElement('button', {
+                      className: 'btn', style: { padding: '4px 12px', fontSize: 13, marginLeft: 'auto' },
+                      onClick: () => saveEditFood(f.id)
+                    }, '✓'),
+                    React.createElement('button', {
+                      className: 'btn ghost', style: { padding: '4px 10px', fontSize: 13 },
+                      onClick: () => setEditingFoodId(null)
+                    }, '✕')
+                  )
+                );
+              }
+              return React.createElement('div', {
+                key: `${f._type}-${f.name}-${i}`,
+                style: { display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: borderStyle }
               },
-                '+ ', f.name,
-                React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 6 } }, `${f._cal} cal`)
-              ),
-              f._type === 'my' && React.createElement('span', {
-                style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 6px', lineHeight: 1 },
-                onClick: () => removeFromMyFoods(f.id)
-              }, '×')
-            ))
+                React.createElement('span', {
+                  style: { flex: 1, fontSize: 13, color: 'var(--t2)', cursor: 'pointer' },
+                  onClick: () => f._type === 'my' ? addMyFood(f) : add(f)
+                },
+                  '+ ', f.name,
+                  React.createElement('span', { style: { color: 'var(--t3)', fontSize: 11, marginLeft: 6 } }, `${f._cal} cal`)
+                ),
+                f._type === 'my' && React.createElement('span', {
+                  style: { fontSize: 15, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
+                  onClick: () => startEditFood(f)
+                }, '✏️'),
+                f._type === 'my' && React.createElement('span', {
+                  style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
+                  onClick: () => removeFromMyFoods(f.id)
+                }, '×')
+              );
+            })
           )
         ),
         // Custom Entry card with smart search
