@@ -1573,21 +1573,30 @@ function App() {
     const [servingQty, setServingQty] = React.useState('1');
     const [loadingMeasures, setLoadingMeasures] = React.useState(false);
     const searchTimerRef = React.useRef(null);
+    const measuresCtrlRef = React.useRef(null); // tracks in-flight measures fetch so addC can abort it
 
     const unitFactors = { g: 1, oz: 28.35, lb: 453.59, cup: 237, 'fl oz': 29.57 };
 
     const searchFoods = async (query) => {
-      if (!query || query.length < 2) { setSuggestions([]); return; }
+      if (!query || query.length < 3) { setSuggestions([]); return; }
       setSearching(true);
       try {
-        // Single USDA call — Foundation+SR Legacy for whole foods, Branded for packaged.
-        // Avoids OFN which returns anything containing the word (apple → croissants, strudels).
+        // For multi-word queries (brand/restaurant), strip filler words so USDA matching is tighter.
+        // "Starbucks Sausage Egg and Cheese Breakfast sandwich" → "Starbucks Sausage Egg Cheese"
+        const words = query.trim().split(/\s+/);
+        const STOP = new Set(['and','or','with','the','a','an','of','for','in','at','by','from','breakfast','lunch','dinner']);
+        const isComplex = words.length >= 3;
+        const searchQuery = isComplex
+          ? words.filter(w => !STOP.has(w.toLowerCase())).slice(0, 6).join(' ')
+          : query;
+
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 6000);
+        const t = setTimeout(() => ctrl.abort(), 7000);
         const res = await fetch(
-          `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy,Branded&pageSize=10`,
+          `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(searchQuery)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy,Branded&pageSize=${isComplex ? 20 : 12}`,
           { signal: ctrl.signal }
         ).finally(() => clearTimeout(t));
+        if (res.status === 429) { setSuggestions([{ _rateLimited: true }]); return; }
         if (!res.ok) throw new Error();
         const data = await res.json();
         const items = (data.foods || []).map(f => {
@@ -1609,11 +1618,11 @@ function App() {
             servingSizeUnit: (f.servingSizeUnit || 'g').toLowerCase(),
             _type: f.dataType,
           };
-        }).filter(f => f.cals100 > 0 || f.protein100 > 0);
-        // Sort: Foundation first, then SR Legacy, then Branded Food (USDA returns "Branded Food" not "Branded")
+        }).filter(f => f.cals100 > 0 || f.protein100 > 0 || f.carbs100 > 0);
+        // Sort: Foundation first, then SR Legacy, then Branded
         const rank = { Foundation: 0, 'SR Legacy': 1, 'Branded Food': 2, Branded: 2 };
         items.sort((a, b) => (rank[a._type] ?? 3) - (rank[b._type] ?? 3));
-        setSuggestions(items.slice(0, 5).map(({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit }) => ({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit })));
+        setSuggestions(items.slice(0, 8).map(({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit }) => ({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit })));
       } catch(e) {
         setSuggestions([]);
       } finally {
@@ -1626,7 +1635,7 @@ function App() {
       setSelectedFood(null);
       setServingMeasures(null);
       clearTimeout(searchTimerRef.current);
-      searchTimerRef.current = setTimeout(() => searchFoods(val), 500);
+      searchTimerRef.current = setTimeout(() => searchFoods(val), 700);
     };
 
     const selectSuggestion = async (s) => {
@@ -1637,9 +1646,12 @@ function App() {
       setSelectedMeasureIdx(0);
       setServingMeasures(null);
       if (!s.fdcId) return;
+      // Cancel any previous in-flight measures fetch before starting a new one
+      if (measuresCtrlRef.current) measuresCtrlRef.current.abort();
       setLoadingMeasures(true);
       try {
         const ctrl = new AbortController();
+        measuresCtrlRef.current = ctrl;
         const t = setTimeout(() => ctrl.abort(), 5000);
         const res = await fetch(`https://api.nal.usda.gov/fdc/v1/food/${s.fdcId}?api_key=DEMO_KEY`, { signal: ctrl.signal }).finally(() => clearTimeout(t));
         if (res.ok) {
@@ -1692,9 +1704,12 @@ function App() {
         label = `${customAmt}${customUnit}`;
       }
       add({ name: `${c.name} (${label})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
+      // Abort any in-flight measures fetch so it can't corrupt subsequent searches
+      if (measuresCtrlRef.current) { measuresCtrlRef.current.abort(); measuresCtrlRef.current = null; }
       setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
       setSelectedFood(null);
       setServingMeasures(null);
+      setLoadingMeasures(false);
       setServingQty('1');
       setSelectedMeasureIdx(0);
       setCustomAmt('100');
@@ -1956,16 +1971,19 @@ function App() {
             suggestions.length > 0 && React.createElement('div', {
               style: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, overflow: 'hidden', marginTop: 2 }
             },
-              ...suggestions.map((s, i) => React.createElement('div', {
-                key: i,
-                style: { padding: '9px 12px', fontSize: 13, borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', color: 'var(--text)' },
-                onClick: () => selectSuggestion(s)
-              },
-                React.createElement('div', null, s.name),
-                React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 2 } },
-                  `${s.cals100} kcal · P ${s.protein100}g · C ${s.carbs100}g · F ${s.fat100}g per 100g`
-                )
-              ))
+              suggestions[0]?._rateLimited
+                ? React.createElement('div', { style: { padding: '10px 12px', fontSize: 12, color: 'var(--amber)' } },
+                    '⚠ Search limit reached — wait a minute and try again')
+                : suggestions.map((s, i) => React.createElement('div', {
+                    key: i,
+                    style: { padding: '9px 12px', fontSize: 13, borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', color: 'var(--text)' },
+                    onClick: () => selectSuggestion(s)
+                  },
+                    React.createElement('div', null, s.name),
+                    React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 2 } },
+                      `${s.cals100} kcal · P ${s.protein100}g · C ${s.carbs100}g · F ${s.fat100}g per 100g`
+                    )
+                  ))
             )
           ),
           selectedFood
