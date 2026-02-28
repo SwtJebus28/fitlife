@@ -1412,6 +1412,9 @@ function App() {
     const [suppConfig, setSuppConfig] = React.useState(null);
     const [showSuppManual, setShowSuppManual] = React.useState(false);
     const [suppManual, setSuppManual] = React.useState({ name: '', timing: 'anytime', isMacro: false, defaultGrams: '', defaultUnit: 'g' });
+    const [editingSuppId, setEditingSuppId] = React.useState(null);
+    const [suppEditDraft, setSuppEditDraft] = React.useState({});
+    const [suppEditShowMicros, setSuppEditShowMicros] = React.useState(false);
 
     // My Foods
     const [myFoods, setMyFoods] = React.useState(_getMyFoods);
@@ -1454,6 +1457,77 @@ function App() {
 
     const removeFromStack = (id) => {
       saveSuppStack(suppStack.filter(s => s.id !== id));
+    };
+
+    const startEditSupp = (s) => {
+      const g = parseFloat(s.defaultGrams) || 1;
+      const scale = (s.defaultUnit === 'g' || s.defaultUnit === 'mg') ? g / 100 : 1;
+      // Macros are per-100g for gram-based supps; show per-serving
+      const m = s.micros || {};
+      setSuppEditDraft({
+        name:        s.name,
+        timing:      s.timing || 'anytime',
+        defaultGrams: String(g),
+        defaultUnit:  s.defaultUnit || 'g',
+        isMacro:     !!s.isMacro,
+        cals:    s.isMacro ? String(Math.round((s.cals100    || 0) * scale)) : '',
+        protein: s.isMacro ? String(Math.round((s.protein100 || 0) * scale * 10) / 10) : '',
+        carbs:   s.isMacro ? String(Math.round((s.carbs100   || 0) * scale * 10) / 10) : '',
+        fat:     s.isMacro ? String(Math.round((s.fat100     || 0) * scale * 10) / 10) : '',
+        // Supplement micros are already per-serving (absolute), not per-100g
+        fiber:      m.fiber     != null ? String(m.fiber)     : '',
+        vitD:       m.vitD      != null ? String(m.vitD)      : '',
+        vitK:       m.vitK      != null ? String(m.vitK)      : '',
+        omega3:     m.omega3    != null ? String(m.omega3)    : '',
+        magnesium:  m.magnesium != null ? String(m.magnesium) : '',
+        calcium:    m.calcium   != null ? String(m.calcium)   : '',
+        zinc:       m.zinc      != null ? String(m.zinc)      : '',
+        b12:        m.b12       != null ? String(m.b12)       : '',
+        vitC:       m.vitC      != null ? String(m.vitC)      : '',
+        potassium:  m.potassium != null ? String(m.potassium) : '',
+      });
+      setSuppEditShowMicros(false);
+      setEditingSuppId(s.id);
+    };
+
+    const saveEditSupp = (id) => {
+      setSuppStack(prev => {
+        const next = prev.map(s => {
+          if (s.id !== id) return s;
+          const g = parseFloat(suppEditDraft.defaultGrams) || s.defaultGrams || 1;
+          const unit = suppEditDraft.defaultUnit || s.defaultUnit || 'g';
+          const scale = (unit === 'g' || unit === 'mg') ? g / 100 : 1;
+          // Macro fields entered per-serving → convert back to per-100g for gram-based units
+          const toH = v => { const n = parseFloat(v); return isNaN(n) ? null : scale > 0 ? n / scale : n; };
+          // Micro fields are already per-serving (absolute) — store directly
+          const toM = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+          const micros = {};
+          [['fiber', toM], ['vitD', toM], ['vitK', toM], ['omega3', toM],
+           ['magnesium', toM], ['calcium', toM], ['zinc', toM], ['b12', toM], ['vitC', toM], ['potassium', toM]
+          ].forEach(([k, fn]) => { const v = fn(suppEditDraft[k]); if (v != null) micros[k] = v; });
+          const isMacro = suppEditDraft.isMacro;
+          const c = isMacro ? toH(suppEditDraft.cals)    : null;
+          const p = isMacro ? toH(suppEditDraft.protein) : null;
+          const cb= isMacro ? toH(suppEditDraft.carbs)   : null;
+          const ft= isMacro ? toH(suppEditDraft.fat)     : null;
+          return {
+            ...s,
+            name:         suppEditDraft.name.trim() || s.name,
+            timing:       suppEditDraft.timing,
+            defaultGrams: g,
+            defaultUnit:  unit,
+            isMacro,
+            cals100:    c  != null ? Math.round(c)   : (isMacro ? (s.cals100    ?? 0) : 0),
+            protein100: p  != null ? +p.toFixed(1)   : (isMacro ? (s.protein100 ?? 0) : 0),
+            carbs100:   cb != null ? +cb.toFixed(1)  : (isMacro ? (s.carbs100   ?? 0) : 0),
+            fat100:     ft != null ? +ft.toFixed(1)  : (isMacro ? (s.fat100     ?? 0) : 0),
+            micros,
+          };
+        });
+        _saveSupps(next);
+        return next;
+      });
+      setEditingSuppId(null);
     };
 
     const toggleSupp = async (supp) => {
@@ -2270,41 +2344,124 @@ function App() {
         ),
 
         // My Stack card
-        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
-          React.createElement('div', { className: 'clbl' }, 'My Stack'),
-          suppStack.length === 0
-            ? React.createElement('div', { style: { fontSize: 13, color: 'var(--t3)', textAlign: 'center', padding: '12px 0' } },
-                'Add supplements from Recommended below or scan a barcode'
-              )
-            : React.createElement(React.Fragment, null,
-                ...suppStack.map(s => {
-                  const checked = !!(tl.supps && tl.supps[s.id]);
-                  const timingColors = { morning: 'var(--amber)', 'pre-workout': 'var(--lime)', 'post-workout': 'var(--blue)', bedtime: 'var(--purple)', anytime: 'var(--t3)' };
-                  return React.createElement('div', { key: s.id,
-                    style: { display: 'flex', alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid var(--border)', gap: 10 }
-                  },
-                    // Checkbox
-                    React.createElement('div', {
-                      style: { width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked ? 'var(--lime)' : 'var(--border)'}`, background: checked ? 'var(--lime)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, marginTop: 1 },
-                      onClick: () => toggleSupp(s)
-                    }, checked ? React.createElement('span', { style: { color: '#000', fontSize: 12, fontWeight: 'bold', lineHeight: 1 } }, '✓') : null),
-                    // Info
-                    React.createElement('div', { style: { flex: 1 } },
-                      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                        React.createElement('span', { style: { fontSize: 14, color: checked ? 'var(--t2)' : 'var(--text)', textDecoration: checked ? 'line-through' : 'none' } }, s.name),
-                        s.isMacro && React.createElement('span', { style: { fontSize: 10, color: 'var(--lime)', border: '1px solid var(--lime)', borderRadius: 4, padding: '1px 5px' } }, 'FUEL')
-                      ),
-                      React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 3 } },
-                        React.createElement('span', { style: { fontSize: 11, color: timingColors[s.timing] || 'var(--t3)' } }, s.timing),
-                        s.defaultGrams && React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)' } }, `${s.defaultGrams}${s.defaultUnit || 'g'}`)
+        editingSuppId
+          ? (() => {
+              const TIMING_OPTS = ['morning','pre-workout','post-workout','bedtime','anytime'];
+              const UNIT_OPTS   = ['g','mg','cap','srv','tsp','tbsp','ml'];
+              const microFields = [
+                { key: 'fiber', label: 'Fiber', unit: 'g' }, { key: 'vitD',  label: 'Vit D',  unit: 'IU' },
+                { key: 'vitK',  label: 'Vit K', unit: 'mcg' }, { key: 'omega3', label: 'Omega-3', unit: 'mg' },
+                { key: 'magnesium', label: 'Magnesium', unit: 'mg' }, { key: 'calcium', label: 'Calcium', unit: 'mg' },
+                { key: 'zinc',  label: 'Zinc',  unit: 'mg' }, { key: 'b12',   label: 'B12',   unit: 'mcg' },
+                { key: 'vitC',  label: 'Vit C', unit: 'mg' }, { key: 'potassium', label: 'Potassium', unit: 'mg' },
+              ];
+              return React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+                // Header
+                React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 } },
+                  React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '✏️ Edit Supplement'),
+                ),
+                // Name
+                React.createElement('div', { className: 'ig', style: { marginBottom: 10 } },
+                  React.createElement('label', { className: 'ilbl' }, 'Name'),
+                  React.createElement('input', { className: 'inp', type: 'text', value: suppEditDraft.name || '', onChange: e => setSuppEditDraft(d => ({ ...d, name: e.target.value })) })
+                ),
+                // Timing + Serving row
+                React.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 10 } },
+                  React.createElement('div', { className: 'ig', style: { flex: 2 } },
+                    React.createElement('label', { className: 'ilbl' }, 'Timing'),
+                    React.createElement('select', { className: 'inp', value: suppEditDraft.timing || 'anytime', onChange: e => setSuppEditDraft(d => ({ ...d, timing: e.target.value })) },
+                      ...TIMING_OPTS.map(t => React.createElement('option', { key: t, value: t }, t))
+                    )
+                  ),
+                  React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                    React.createElement('label', { className: 'ilbl' }, 'Amount'),
+                    React.createElement('input', { className: 'inp', type: 'number', min: '0', value: suppEditDraft.defaultGrams || '', onChange: e => setSuppEditDraft(d => ({ ...d, defaultGrams: e.target.value })) })
+                  ),
+                  React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                    React.createElement('label', { className: 'ilbl' }, 'Unit'),
+                    React.createElement('select', { className: 'inp', value: suppEditDraft.defaultUnit || 'g', onChange: e => setSuppEditDraft(d => ({ ...d, defaultUnit: e.target.value })) },
+                      ...UNIT_OPTS.map(u => React.createElement('option', { key: u, value: u }, u))
+                    )
+                  )
+                ),
+                // FUEL toggle
+                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '8px 10px', background: 'var(--bg2)', borderRadius: 8 } },
+                  React.createElement('input', { type: 'checkbox', id: 'supp-fuel-toggle', checked: !!suppEditDraft.isMacro, onChange: e => setSuppEditDraft(d => ({ ...d, isMacro: e.target.checked })) }),
+                  React.createElement('label', { htmlFor: 'supp-fuel-toggle', style: { fontSize: 13, color: suppEditDraft.isMacro ? 'var(--lime)' : 'var(--t2)', cursor: 'pointer' } }, 'FUEL — logs macros to daily totals when checked in')
+                ),
+                // Macros per serving (only for FUEL)
+                suppEditDraft.isMacro && React.createElement(React.Fragment, null,
+                  React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', marginBottom: 6 } }, 'Macros per serving'),
+                  React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 } },
+                    ...[['cals','Cal'],['protein','Protein (g)'],['carbs','Carbs (g)'],['fat','Fat (g)']].map(([k,lbl]) =>
+                      React.createElement('div', { key: k, className: 'ig' },
+                        React.createElement('label', { className: 'ilbl' }, lbl),
+                        React.createElement('input', { className: 'inp', type: 'number', min: '0', value: suppEditDraft[k] || '', onChange: e => setSuppEditDraft(d => ({ ...d, [k]: e.target.value })) })
                       )
-                    ),
-                    // Delete
-                    React.createElement('span', { style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }, onClick: () => removeFromStack(s.id) }, '×')
-                  );
-                })
-              )
-        ),
+                    )
+                  )
+                ),
+                // Micros collapsible
+                React.createElement('div', { style: { borderTop: '1px solid var(--border)', paddingTop: 10 } },
+                  React.createElement('div', {
+                    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: suppEditShowMicros ? 10 : 0 },
+                    onClick: () => setSuppEditShowMicros(v => !v)
+                  },
+                    React.createElement('span', { style: { fontSize: 12, color: 'var(--t3)' } }, 'Micros per serving'),
+                    React.createElement('span', { style: { fontSize: 12, color: 'var(--t3)' } }, suppEditShowMicros ? '▾' : '▸')
+                  ),
+                  suppEditShowMicros && React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
+                    ...microFields.map(({ key, label, unit }) =>
+                      React.createElement('div', { key, className: 'ig' },
+                        React.createElement('label', { className: 'ilbl' }, `${label} (${unit})`),
+                        React.createElement('input', { className: 'inp', type: 'number', min: '0', value: suppEditDraft[key] || '', onChange: e => setSuppEditDraft(d => ({ ...d, [key]: e.target.value })) })
+                      )
+                    )
+                  )
+                ),
+                // Buttons
+                React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 14 } },
+                  React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => setEditingSuppId(null) }, 'Cancel'),
+                  React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center', fontSize: 13 }, onClick: () => saveEditSupp(editingSuppId) }, 'Save')
+                )
+              );
+            })()
+          : React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+              React.createElement('div', { className: 'clbl' }, 'My Stack'),
+              suppStack.length === 0
+                ? React.createElement('div', { style: { fontSize: 13, color: 'var(--t3)', textAlign: 'center', padding: '12px 0' } },
+                    'Add supplements from Recommended below or scan a barcode'
+                  )
+                : React.createElement(React.Fragment, null,
+                    ...suppStack.map(s => {
+                      const checked = !!(tl.supps && tl.supps[s.id]);
+                      const timingColors = { morning: 'var(--amber)', 'pre-workout': 'var(--lime)', 'post-workout': 'var(--blue)', bedtime: 'var(--purple)', anytime: 'var(--t3)' };
+                      return React.createElement('div', { key: s.id,
+                        style: { display: 'flex', alignItems: 'flex-start', padding: '10px 0', borderBottom: '1px solid var(--border)', gap: 10 }
+                      },
+                        // Checkbox
+                        React.createElement('div', {
+                          style: { width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked ? 'var(--lime)' : 'var(--border)'}`, background: checked ? 'var(--lime)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, marginTop: 1 },
+                          onClick: () => toggleSupp(s)
+                        }, checked ? React.createElement('span', { style: { color: '#000', fontSize: 12, fontWeight: 'bold', lineHeight: 1 } }, '✓') : null),
+                        // Info
+                        React.createElement('div', { style: { flex: 1 } },
+                          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                            React.createElement('span', { style: { fontSize: 14, color: checked ? 'var(--t2)' : 'var(--text)', textDecoration: checked ? 'line-through' : 'none' } }, s.name),
+                            s.isMacro && React.createElement('span', { style: { fontSize: 10, color: 'var(--lime)', border: '1px solid var(--lime)', borderRadius: 4, padding: '1px 5px' } }, 'FUEL')
+                          ),
+                          React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 3 } },
+                            React.createElement('span', { style: { fontSize: 11, color: timingColors[s.timing] || 'var(--t3)' } }, s.timing),
+                            s.defaultGrams && React.createElement('span', { style: { fontSize: 11, color: 'var(--t3)' } }, `${s.defaultGrams}${s.defaultUnit || 'g'}`)
+                          )
+                        ),
+                        // Edit + Delete
+                        React.createElement('span', { style: { fontSize: 13, color: 'var(--blue)', cursor: 'pointer', padding: '2px 6px', lineHeight: 1 }, onClick: () => startEditSupp(s) }, '✏️'),
+                        React.createElement('span', { style: { fontSize: 18, color: 'var(--t3)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }, onClick: () => removeFromStack(s.id) }, '×')
+                      );
+                    })
+                  )
+            ),
 
         // Add supplement card
         React.createElement('div', { className: 'card' },
