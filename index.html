@@ -1714,6 +1714,13 @@ function App() {
       setLogItemQty({ idx: null, draft: '' });
     };
 
+    const updateFlag = async (key, val) => {
+      const u = { ...tl, flags: { ...(tl.flags || {}), [key]: val } };
+      const nn = [u, ...nutrition.filter(n => n.date !== today)];
+      setNutrition(nn);
+      await sset('nutrition', nn);
+    };
+
     const addMyFood = (f) => {
       const g = f.defaultGrams || 100;
       const scale = g / 100;
@@ -2133,6 +2140,28 @@ function App() {
                   style: { height: 32, padding: '0 12px', borderRadius: 6, border: 'none', background: 'var(--lime)', color: '#000', fontSize: 13, fontWeight: 700, cursor: 'pointer', flexShrink: 0 },
                   onClick: () => updateItemQty(i, logItemQty.draft)
                 }, '✓')
+              )
+            );
+          })
+        ),
+        // ── Daily Habits ──────────────────────────────────────
+        React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+          React.createElement('div', { className: 'clbl' }, 'Daily Habits'),
+          ...[
+            { key: 'alcohol', label: 'Alcohol',             note: 'Had alcohol today',                          color: 'var(--red)'    },
+            { key: 'fasting', label: 'Fasting / Skipped Meal', note: 'Intentionally skipped a meal',           color: 'var(--purple)' },
+            { key: 'water',   label: 'Hydrated',            note: 'Drank ~3 L / 100 oz of water',              color: 'var(--blue)'   },
+            { key: 'other',   label: 'Other',               note: 'Anything else worth noting for this day',   color: 'var(--amber)'  },
+          ].map(({ key, label, note, color }) => {
+            const checked = !!(tl.flags && tl.flags[key]);
+            return React.createElement('div', { key, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border)' } },
+              React.createElement('div', {
+                style: { width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked ? color : 'var(--border)'}`, background: checked ? color : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 },
+                onClick: () => updateFlag(key, !checked)
+              }, checked ? React.createElement('span', { style: { color: key === 'water' || key === 'fasting' ? '#fff' : '#000', fontSize: 12, fontWeight: 'bold', lineHeight: 1 } }, '✓') : null),
+              React.createElement('div', null,
+                React.createElement('div', { style: { fontSize: 14, color: checked ? color : 'var(--text)' } }, label),
+                React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 1 } }, note)
               )
             );
           })
