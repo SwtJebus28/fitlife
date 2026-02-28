@@ -820,6 +820,18 @@ function App() {
           if (data.status === 1 && data.product) {
             const p = data.product; const n = p.nutriments || {};
             const servingQty = parseFloat(p.serving_quantity) || 100;
+            const micros100 = {
+              fiber:     +((n['fiber_100g'] || n['fiber-food_100g'] || 0).toFixed(1)),
+              vitD:      Math.round((n['vitamin-d_100g'] || 0) * 40),
+              vitK:      +((n['vitamin-k_100g'] || 0).toFixed(1)),
+              omega3:    Math.round(((n['omega-3-fat_100g'] || 0) + (n['epa_100g'] || 0) + (n['dha_100g'] || 0)) * 1000),
+              magnesium: Math.round(n['magnesium_100g'] || 0),
+              calcium:   Math.round(n['calcium_100g'] || 0),
+              zinc:      +((n['zinc_100g'] || 0).toFixed(1)),
+              b12:       +((n['vitamin-b12_100g'] || 0).toFixed(2)),
+              vitC:      Math.round(n['vitamin-c_100g'] || 0),
+              potassium: Math.round(n['potassium_100g'] || 0),
+            };
             return setFound({
               name: (p.product_name || p.generic_name || 'Scanned Product').trim(),
               cals100: Math.round(n['energy-kcal_100g'] || n['energy-kcal'] || 0),
@@ -827,7 +839,7 @@ function App() {
               carbs100: +((n.carbohydrates_100g || 0).toFixed(1)),
               fat100: +((n.fat_100g || 0).toFixed(1)),
               servingSize: p.serving_size || `${Math.round(servingQty)}g`,
-              servingQty, barcode, source: 'Open Food Facts',
+              servingQty, barcode, source: 'Open Food Facts', micros100,
             });
           }
         }
@@ -1028,6 +1040,7 @@ function App() {
         name: food.name, cals100: food.cals100, protein100: food.protein100,
         carbs100: food.carbs100, fat100: food.fat100,
         defaultGrams: g, barcode: food.barcode || null,
+        micros100: food.micros100 || {},
       });
       onClose();
     };
@@ -1228,7 +1241,7 @@ function App() {
               { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
               { type: 'text', text: mode === 'supp'
                 ? 'This is a Supplement Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":1,"cals100":0,"protein100":0,"carbs100":0,"fat100":0,"micros_per_serving":{"fiber":0,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":0,"potassium":0}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using the serving size). For capsules/softgels/tablets use serving_g=1. micros_per_serving units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA in mg, magnesium/calcium/zinc/vitC/potassium=mg, b12=mcg. Use 0 for any not listed.'
-                : 'This is a Nutrition Facts or Supplement Facts label. Extract the data and return ONLY a JSON object, no other text: {"name":"product name","serving_g":30,"cals100":120,"protein100":25,"carbs100":5,"fat100":2} where cals100/protein100/carbs100/fat100 are per 100g (convert from per-serving values using the serving size). For capsules/softgels/tablets use serving_g=1.'
+                : 'This is a Nutrition Facts label. Return ONLY a JSON object, no other text:\n{"name":"product name","serving_g":30,"cals100":120,"protein100":25,"carbs100":5,"fat100":2,"micros_per_serving":{"fiber":3,"vitD":0,"vitK":0,"omega3":0,"magnesium":0,"calcium":0,"zinc":0,"b12":0,"vitC":0,"potassium":200}}\ncals100/protein100/carbs100/fat100 are per 100g (convert from per-serving using serving size). micros_per_serving are the actual per-serving values from the label (0 if not listed). Units: fiber=g, vitD=IU, vitK=mcg, omega3=total EPA+DHA mg, magnesium/calcium/zinc/vitC/potassium=mg, b12=mcg.'
               }
             ]}],
           }),
@@ -1513,12 +1526,20 @@ function App() {
     const addMyFood = (f) => {
       const g = f.defaultGrams || 100;
       const scale = g / 100;
+      const micros = {};
+      if (f.micros100) {
+        Object.entries(f.micros100).forEach(([k, v]) => {
+          const sc = v * scale;
+          micros[k] = k === 'fiber' || k === 'b12' || k === 'zinc' || k === 'vitK' ? +sc.toFixed(k === 'b12' ? 2 : 1) : Math.round(sc);
+        });
+      }
       add({
         name: `${f.name} (${g}g)`,
         cals: Math.round(f.cals100 * scale),
         protein: Math.round(f.protein100 * scale * 10) / 10,
         carbs: Math.round(f.carbs100 * scale * 10) / 10,
         fat: Math.round(f.fat100 * scale * 10) / 10,
+        micros,
       });
     };
 
@@ -1675,8 +1696,22 @@ function App() {
             setSuppConfig({ name: raw.name, isMacro: raw.cals100 > 10, timing: 'anytime', cals100: raw.cals100, protein100: raw.protein100, carbs100: raw.carbs100, fat100: raw.fat100, defaultGrams: raw.defaultGrams, defaultUnit: 'g', micros: raw.micros || {} });
             setView('supps');
           } else {
-            saveToMyFoods(raw);
-            add({ name: `${raw.name} (${raw.defaultGrams}g)`, cals: Math.round(raw.cals100 * raw.defaultGrams / 100), protein: Math.round(raw.protein100 * raw.defaultGrams / 100 * 10) / 10, carbs: Math.round(raw.carbs100 * raw.defaultGrams / 100 * 10) / 10, fat: Math.round(raw.fat100 * raw.defaultGrams / 100 * 10) / 10 });
+            // Convert per-serving micros → per-100g for storage
+            const micros100 = {};
+            if (raw.micros_per_serving && raw.serving_g > 0) {
+              const s = 100 / raw.serving_g;
+              Object.entries(raw.micros_per_serving).forEach(([k, v]) => { micros100[k] = +(v * s).toFixed(k === 'b12' ? 2 : 1); });
+            }
+            saveToMyFoods({ ...raw, micros100 });
+            // Scale by serving for today's log
+            const g = raw.defaultGrams || raw.serving_g || 100;
+            const scale = g / 100;
+            const micros = {};
+            Object.entries(micros100).forEach(([k, v]) => {
+              const sc = v * scale;
+              micros[k] = k === 'fiber' || k === 'b12' || k === 'zinc' || k === 'vitK' ? +sc.toFixed(k === 'b12' ? 2 : 1) : Math.round(sc);
+            });
+            add({ name: `${raw.name} (${g}g)`, cals: Math.round(raw.cals100 * scale), protein: Math.round(raw.protein100 * scale * 10) / 10, carbs: Math.round(raw.carbs100 * scale * 10) / 10, fat: Math.round(raw.fat100 * scale * 10) / 10, micros });
           }
         },
       }),
