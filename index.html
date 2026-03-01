@@ -1683,6 +1683,7 @@ function App() {
           if (!checked) return;
           const s = suppStack.find(x => String(x.id) === String(id));
           if (!s) return;
+          if (s.isMacro) return; // FUEL supps already in tl.items — skip to avoid double-count
           let val = null;
           if (isMacro && s.isMacro) {
             const scale = (parseFloat(s.defaultGrams) || 0) / 100;
