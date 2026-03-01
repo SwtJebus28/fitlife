@@ -1362,7 +1362,7 @@ function App() {
   // NutritionTab override — adds Scan Barcode, My Foods, smart search
   // ============================================================
   const MY_FOODS_KEY = 'fitlife_my_foods';
-  const _SEEDED_KEY = 'fitlife_presets_v1';
+  const _SEEDED_KEY = 'fitlife_presets_v2';
   const _PRESET_FOODS_DATA = [
     { id: 'preset_1',  _presetId: 'preset_1',  name: 'Chicken Breast (6oz)',    defaultGrams: 170, defaultUnit: 'g', cals100: 109, protein100: 20.6, carbs100: 0,    fat100: 2.4,  micros100: { niacin: 8.8, iron: 0.6, potassium: 213, b12: 0.2, vitE: 0.2 } },
     { id: 'preset_2',  _presetId: 'preset_2',  name: 'Greek Yogurt (1 cup)',    defaultGrams: 245, defaultUnit: 'g', cals100:  53, protein100:  9.0, carbs100: 3.7,  fat100: 0,    micros100: { calcium: 127, b12: 0.5, potassium: 147, zinc: 0.7 } },
@@ -1378,6 +1378,7 @@ function App() {
     { id: 'preset_12', _presetId: 'preset_12', name: 'Broccoli (2 cups)',       defaultGrams: 182, defaultUnit: 'g', cals100:  33, protein100:  2.7, carbs100: 6.6,  fat100: 0.4,  micros100: { vitC: 55, vitK: 106, fiber: 2.6, calcium: 48, iron: 0.8, potassium: 277 } },
     { id: 'preset_13', _presetId: 'preset_13', name: 'Ground Beef 93% (5oz)',   defaultGrams: 142, defaultUnit: 'g', cals100: 151, protein100: 21.1, carbs100: 0,    fat100: 7.0,  micros100: { zinc: 5.4, iron: 1.9, b12: 1.6, niacin: 5.4 } },
     { id: 'preset_14', _presetId: 'preset_14', name: 'Whole Milk (1 cup)',      defaultGrams: 244, defaultUnit: 'g', cals100:  61, protein100:  3.3, carbs100: 4.9,  fat100: 3.3,  micros100: { calcium: 113, vitD: 40, b12: 0.45, potassium: 132 } },
+    { id: 'preset_15', _presetId: 'preset_15', name: 'Kale (1 cup raw)',        defaultGrams:  67, defaultUnit: 'g', cals100:  49, protein100:  4.3, carbs100: 8.8,  fat100: 0.9,  micros100: { fiber: 3.6, vitK: 817, vitC: 120, calcium: 150, iron: 1.5, magnesium: 47, potassium: 491, vitE: 0.7 } },
   ];
   const _getMyFoods = () => {
     try {
