@@ -3062,7 +3062,7 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
       ),
 
       // ── Sync settings card ────────────────────────────────────
-      React.createElement('div', { className: 'card', style: { margin: '10px 16px 90px' } },
+      React.createElement('div', { className: 'card', style: { margin: '10px 16px 0' } },
         React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
           React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '🔄 Sync'),
           syncToken && !syncEdit
@@ -3101,6 +3101,25 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
                 React.createElement('button', { className: 'btn ghost', style: { fontSize: 13, color: 'var(--t3)' }, title: 'Disconnect sync', onClick: _clearSync }, '✕')
               )
             )
+      ),
+
+      // ── Clear cache ───────────────────────────────────────────
+      React.createElement('div', { style: { textAlign: 'center', padding: '14px 16px 90px' } },
+        React.createElement('button', {
+          className: 'btn ghost',
+          style: { fontSize: 12, color: 'var(--t3)', padding: '6px 14px' },
+          onClick: async () => {
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.map(k => caches.delete(k)));
+            }
+            if (navigator.serviceWorker) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(r => r.unregister()));
+            }
+            window.location.href = window.location.pathname + '?v=' + Date.now();
+          }
+        }, '↺ Clear cache & reload')
       )
     );
   }
