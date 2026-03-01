@@ -1855,8 +1855,7 @@ function App() {
       if (!query || query.length < 3) { setSuggestions([]); return; }
       setSearching(true);
       try {
-        // For multi-word queries (brand/restaurant), strip filler words so USDA matching is tighter.
-        // "Starbucks Sausage Egg and Cheese Breakfast sandwich" → "Starbucks Sausage Egg Cheese"
+        const usdaKey = localStorage.getItem('fitlife_usda_key') || 'DEMO_KEY';
         const words = query.trim().split(/\s+/);
         const STOP = new Set(['and','or','with','the','a','an','of','for','in','at','by','from','breakfast','lunch','dinner']);
         const isComplex = words.length >= 3;
@@ -1865,38 +1864,89 @@ function App() {
           : query;
 
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 7000);
-        const res = await fetch(
-          `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(searchQuery)}&api_key=DEMO_KEY&dataType=Foundation,SR%20Legacy,Branded&pageSize=${isComplex ? 20 : 12}`,
-          { signal: ctrl.signal }
-        ).finally(() => clearTimeout(t));
-        if (res.status === 429) { setSuggestions([{ _rateLimited: true }]); return; }
-        if (!res.ok) throw new Error();
-        const data = await res.json();
-        const items = (data.foods || []).map(f => {
-          const nmap = {};
-          (f.foodNutrients || []).forEach(n => { nmap[n.nutrientId] = n.value; });
-          const parts = (f.description || '').split(',');
-          const name = parts[0].trim().replace(/\b\w/g, l => l.toUpperCase()) +
-            (parts[1] ? ` (${parts[1].trim().toLowerCase()})` : '');
-          // Energy: try 1008 (kcal), 2047/2048 (Atwater variants), 1062 (kJ÷4.184)
-          const kcal = nmap[1008] || nmap[2047] || nmap[2048] || Math.round((nmap[1062] || 0) / 4.184) || 0;
-          return {
-            name,
-            cals100: Math.round(kcal),
-            protein100: +((nmap[1003] || 0).toFixed(1)),
-            carbs100:   +((nmap[1005] || 0).toFixed(1)),
-            fat100:     +((nmap[1004] || 0).toFixed(1)),
-            fdcId: f.fdcId,
-            servingSize: f.servingSize || null,
-            servingSizeUnit: (f.servingSizeUnit || 'g').toLowerCase(),
-            _type: f.dataType,
-          };
-        }).filter(f => f.cals100 > 0 || f.protein100 > 0 || f.carbs100 > 0);
-        // Sort: Foundation first, then SR Legacy, then Branded
-        const rank = { Foundation: 0, 'SR Legacy': 1, 'Branded Food': 2, Branded: 2 };
-        items.sort((a, b) => (rank[a._type] ?? 3) - (rank[b._type] ?? 3));
-        setSuggestions(items.slice(0, 8).map(({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit }) => ({ name, cals100, protein100, carbs100, fat100, fdcId, servingSize, servingSizeUnit })));
+        const t = setTimeout(() => ctrl.abort(), 8000);
+
+        // ── Search USDA + Open Food Facts in parallel ─────────────
+        const [usdaResult, offResult] = await Promise.allSettled([
+          fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(searchQuery)}&api_key=${usdaKey}&dataType=Foundation,SR%20Legacy,Branded&pageSize=${isComplex ? 20 : 12}`, { signal: ctrl.signal }),
+          fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&json=1&action=process&page_size=15&fields=product_name,brands,nutriments`, { signal: ctrl.signal }),
+        ]).finally(() => clearTimeout(t));
+
+        // ── Process USDA ──────────────────────────────────────────
+        let usdaItems = [];
+        if (usdaResult.status === 'fulfilled') {
+          const res = usdaResult.value;
+          if (res.status === 429) { setSuggestions([{ _rateLimited: true }]); return; }
+          if (res.ok) {
+            const data = await res.json();
+            const rank = { Foundation: 0, 'SR Legacy': 1, 'Branded Food': 2, Branded: 2 };
+            // Helper: round nutrient based on key
+            const _rnd = (k, v) => k === 'b12' ? +v.toFixed(2) : ['fiber','vitK','zinc','iron','niacin','vitE'].includes(k) ? +v.toFixed(1) : Math.round(v);
+            usdaItems = (data.foods || []).map(f => {
+              const nmap = {};
+              (f.foodNutrients || []).forEach(n => { nmap[n.nutrientId] = n.value; });
+              const parts = (f.description || '').split(',');
+              const name = parts[0].trim().replace(/\b\w/g, l => l.toUpperCase()) +
+                (parts[1] ? ` (${parts[1].trim().toLowerCase()})` : '');
+              const kcal = nmap[1008] || nmap[2047] || nmap[2048] || Math.round((nmap[1062] || 0) / 4.184) || 0;
+              // Build micros100 from USDA nutrient IDs (values already per 100g in USDA units)
+              const micros100 = {};
+              const _m = (k, id, scale) => { const v = nmap[id]; if (v > 0) micros100[k] = _rnd(k, v * (scale || 1)); };
+              _m('fiber', 1079); _m('vitD', 1114, 40); _m('vitK', 1185); _m('calcium', 1087);
+              _m('magnesium', 1090); _m('zinc', 1095); _m('b12', 1178); _m('vitC', 1162);
+              _m('potassium', 1092); _m('iron', 1089); _m('niacin', 1167); _m('vitE', 1109);
+              return {
+                name, micros100, fdcId: f.fdcId,
+                cals100: Math.round(kcal),
+                protein100: +((nmap[1003] || 0).toFixed(1)),
+                carbs100:   +((nmap[1005] || 0).toFixed(1)),
+                fat100:     +((nmap[1004] || 0).toFixed(1)),
+                servingSize: f.servingSize || null,
+                servingSizeUnit: (f.servingSizeUnit || 'g').toLowerCase(),
+                _source: 'usda', _rank: rank[f.dataType] ?? 3,
+              };
+            }).filter(f => f.cals100 > 0 || f.protein100 > 0);
+            usdaItems.sort((a, b) => a._rank - b._rank);
+          }
+        }
+
+        // ── Process Open Food Facts ───────────────────────────────
+        // OFF stores macros in g/100g; minerals/vitamins in g/100g → multiply by 1000 for mg
+        let offItems = [];
+        if (offResult.status === 'fulfilled' && offResult.value.ok) {
+          const data = await offResult.value.json();
+          const _g2mg = (v, cap) => { const mg = Math.round((v || 0) * 1000); return (mg > 0 && mg <= cap) ? mg : null; };
+          offItems = (data.products || []).filter(p => p.product_name).map(p => {
+            const n = p.nutriments || {};
+            const kcal = n['energy-kcal_100g'] || Math.round((n['energy_100g'] || 0) / 4.184);
+            const brand = p.brands ? p.brands.split(',')[0].trim() : '';
+            const name = (brand ? `${p.product_name} (${brand})` : p.product_name)
+              .replace(/\b\w/g, l => l.toUpperCase()).slice(0, 60);
+            const micros100 = {};
+            if (n.fiber_100g > 0) micros100.fiber = +(n.fiber_100g).toFixed(1);
+            const ca = _g2mg(n.calcium_100g, 2000);        if (ca)  micros100.calcium   = ca;
+            if ((n.iron_100g||0)*1000 > 0)   micros100.iron      = +((n.iron_100g||0)*1000).toFixed(1);
+            const mg = _g2mg(n.magnesium_100g, 1000);      if (mg)  micros100.magnesium = mg;
+            if ((n.zinc_100g||0)*1000 > 0)   micros100.zinc      = +((n.zinc_100g||0)*1000).toFixed(1);
+            const k  = _g2mg(n.potassium_100g, 5000);      if (k)   micros100.potassium = k;
+            const vc = _g2mg(n['vitamin-c_100g'], 2000);   if (vc)  micros100.vitC      = vc;
+            if ((n['vitamin-e_100g']||0)*1000 > 0) micros100.vitE = +((n['vitamin-e_100g']||0)*1000).toFixed(1);
+            return {
+              name, micros100, fdcId: null, servingSize: null, servingSizeUnit: 'g',
+              cals100: Math.round(kcal),
+              protein100: +((n.proteins_100g || 0).toFixed(1)),
+              carbs100:   +((n.carbohydrates_100g || 0).toFixed(1)),
+              fat100:     +((n.fat_100g || 0).toFixed(1)),
+              _source: 'off', _rank: 4,
+            };
+          }).filter(p => p.cals100 > 0 || p.protein100 > 0);
+        }
+
+        // ── Merge: USDA first, append non-duplicate OFF results ───
+        const usdaNames = new Set(usdaItems.map(f => f.name.toLowerCase().slice(0, 25)));
+        const merged = [...usdaItems, ...offItems.filter(f => !usdaNames.has(f.name.toLowerCase().slice(0, 25)))];
+        merged.sort((a, b) => a._rank - b._rank);
+        setSuggestions(merged.slice(0, 10));
       } catch(e) {
         setSuggestions([]);
       } finally {
@@ -1977,9 +2027,18 @@ function App() {
       } else {
         label = `${customAmt}${customUnit}`;
       }
-      add({ name: `${c.name} (${label})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat });
+      // Scale micros100 to per-serving amount for today's log
+      const micros = {};
+      if (selectedFood.micros100 && preview.grams) {
+        const scale = preview.grams / 100;
+        Object.entries(selectedFood.micros100).forEach(([k, v]) => {
+          const sc = v * scale;
+          micros[k] = ['b12','vitK','fiber','zinc','iron','niacin','vitE'].includes(k) ? +sc.toFixed(k === 'b12' ? 2 : 1) : Math.round(sc);
+        });
+      }
+      add({ name: `${c.name} (${label})`, cals: preview.cals, protein: preview.protein, carbs: preview.carbs, fat: preview.fat, micros });
       // Auto-save to My Foods (deduplicates by fdcId so re-adds just update defaultGrams)
-      saveToMyFoods({ name: selectedFood.name, cals100: selectedFood.cals100, protein100: selectedFood.protein100, carbs100: selectedFood.carbs100, fat100: selectedFood.fat100, defaultGrams: preview.grams, micros100: {}, fdcId: selectedFood.fdcId || null, barcode: null });
+      saveToMyFoods({ name: selectedFood.name, cals100: selectedFood.cals100, protein100: selectedFood.protein100, carbs100: selectedFood.carbs100, fat100: selectedFood.fat100, defaultGrams: preview.grams, micros100: selectedFood.micros100 || {}, fdcId: selectedFood.fdcId || null, barcode: null });
       // Abort any in-flight measures fetch so it can't corrupt subsequent searches
       if (measuresCtrlRef.current) { measuresCtrlRef.current.abort(); measuresCtrlRef.current = null; }
       setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
@@ -2339,7 +2398,10 @@ function App() {
                     style: { padding: '9px 12px', fontSize: 13, borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', color: 'var(--text)' },
                     onClick: () => selectSuggestion(s)
                   },
-                    React.createElement('div', null, s.name),
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                      React.createElement('span', null, s.name),
+                      s._source === 'off' && React.createElement('span', { style: { fontSize: 9, padding: '1px 4px', borderRadius: 3, background: 'rgba(96,165,250,0.15)', border: '1px solid rgba(96,165,250,0.4)', color: 'var(--blue)', flexShrink: 0, lineHeight: 1.4 } }, 'Open Foods')
+                    ),
                     React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 2 } },
                       `${s.cals100} kcal · P ${s.protein100}g · C ${s.carbs100}g · F ${s.fat100}g per 100g`
                     )
@@ -2751,6 +2813,11 @@ function App() {
     const [keyDraft, setKeyDraft] = React.useState('');
     const [editingKey, setEditingKey] = React.useState(false);
 
+    // ── USDA API key state ─────────────────────────────────────
+    const [usdaKey, setUsdaKey]     = React.useState(localStorage.getItem('fitlife_usda_key') || '');
+    const [usdaDraft, setUsdaDraft] = React.useState('');
+    const [usdaEdit, setUsdaEdit]   = React.useState(false);
+
     // ── Sync state ────────────────────────────────────────────
     const [syncToken, setSyncToken]   = React.useState(localStorage.getItem('fitlife_github_token') || '');
     const [syncDraft, setSyncDraft]   = React.useState('');
@@ -2784,6 +2851,16 @@ function App() {
     function _clearSync() {
       ['fitlife_github_token','fitlife_gist_id','fitlife_sync_at'].forEach(k => localStorage.removeItem(k));
       setSyncToken(''); setSyncAt(null); setSyncEdit(false);
+    }
+    function _saveUsdaKey() {
+      const k = usdaDraft.trim();
+      if (!k) return;
+      localStorage.setItem('fitlife_usda_key', k);
+      setUsdaKey(k); setUsdaDraft(''); setUsdaEdit(false);
+    }
+    function _clearUsdaKey() {
+      localStorage.removeItem('fitlife_usda_key');
+      setUsdaKey(''); setUsdaEdit(false);
     }
 
     const SUGG = [
@@ -2947,6 +3024,41 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
           onKeyDown: e => e.key === 'Enter' && send()
         }),
         React.createElement('button', { className: 'btn', onClick: () => send(), disabled: loading || !input.trim() }, 'Send')
+      ),
+
+      // ── Food Search / USDA key card ───────────────────────────
+      React.createElement('div', { className: 'card', style: { margin: '10px 16px 0' } },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+          React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '🔍 Food Search'),
+          usdaKey && !usdaEdit
+            ? React.createElement('span', { style: { fontSize: 11, color: 'var(--lime)' } }, '✓ USDA key set')
+            : null
+        ),
+        (!usdaKey || usdaEdit)
+          ? React.createElement(React.Fragment, null,
+              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', lineHeight: 1.55, marginBottom: 10 } },
+                'Searches use USDA + Open Food Facts in parallel for best restaurant and packaged food coverage. A free USDA API key removes the 30 req/hr rate limit. Register at ',
+                React.createElement('a', { href: 'https://fdc.nal.usda.gov/api-key-signup', target: '_blank', style: { color: 'var(--blue)' } }, 'fdc.nal.usda.gov'),
+                ' (instant, free forever).'
+              ),
+              React.createElement('div', { className: 'ig' },
+                React.createElement('label', { className: 'ilbl' }, 'USDA API Key (optional)'),
+                React.createElement('input', { className: 'inp', type: 'password', placeholder: 'Paste key here…', value: usdaDraft, onChange: e => setUsdaDraft(e.target.value) })
+              ),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+                usdaEdit && React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => { setUsdaEdit(false); setUsdaDraft(''); } }, 'Cancel'),
+                React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center', fontSize: 13 }, disabled: !usdaDraft.trim(), onClick: _saveUsdaKey }, 'Save Key')
+              )
+            )
+          : React.createElement(React.Fragment, null,
+              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', marginBottom: 10 } },
+                'USDA + Open Food Facts searched in parallel. Best coverage for restaurants, chains, packaged goods, and whole foods.'
+              ),
+              React.createElement('div', { style: { display: 'flex', gap: 8 } },
+                React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => { setUsdaEdit(true); setUsdaDraft(''); } }, '🔑 Update Key'),
+                React.createElement('button', { className: 'btn ghost', style: { fontSize: 13, color: 'var(--t3)' }, onClick: _clearUsdaKey }, '✕ Remove')
+              )
+            )
       ),
 
       // ── Sync settings card ────────────────────────────────────
