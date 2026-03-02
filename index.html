@@ -1454,6 +1454,8 @@ function App() {
     const [editingFoodId, setEditingFoodId] = React.useState(null);
     const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '', cals: '', protein: '', carbs: '', fat: '', fiber: '', vitD: '', vitK: '', omega3: '', magnesium: '', calcium: '', zinc: '', b12: '', vitC: '', potassium: '', iron: '', niacin: '', vitE: '' });
     const [editShowMicros, setEditShowMicros] = React.useState(false);
+    const [manualMicros, setManualMicros]         = React.useState({});
+    const [manualShowMicros, setManualShowMicros] = React.useState(false);
 
     const saveToMyFoods = (raw) => {
       setMyFoods(prev => {
@@ -2055,6 +2057,17 @@ function App() {
       setSuggestions([]);
     };
 
+    const addManual = () => {
+      const name = c.name.trim();
+      if (!name || !c.cals) return;
+      const micros = {};
+      Object.entries(manualMicros).forEach(([k, v]) => { const n = parseFloat(v); if (!isNaN(n) && n > 0) micros[k] = n; });
+      add({ name, cals: +(c.cals || 0), protein: +(c.protein || 0), carbs: +(c.carbs || 0), fat: +(c.fat || 0), micros });
+      setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+      setManualMicros({});
+      setManualShowMicros(false);
+    };
+
     const left = USER.targetCals - tl.cals;
 
     return React.createElement('div', null,
@@ -2383,81 +2396,61 @@ function App() {
                 })
               )
             ),
-        // Custom Entry card with smart search
-        React.createElement('div', { className: 'card' },
-          React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
-          React.createElement('div', { className: 'ig', style: { position: 'relative' } },
-            React.createElement('label', { className: 'ilbl' }, 'Food Name'),
-            React.createElement('input', { className: 'inp', type: 'search', placeholder: 'e.g. Coffee, Chicken breast', value: c.name, onChange: e => handleNameChange(e.target.value), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'none', spellCheck: false }),
-            searching && React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 4 } }, 'Searching...'),
-            suggestions.length > 0 && React.createElement('div', {
-              style: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, overflow: 'hidden', marginTop: 2 }
-            },
-              suggestions[0]?._rateLimited
-                ? React.createElement('div', { style: { padding: '10px 12px', fontSize: 12, color: 'var(--amber)' } },
-                    '⚠ Search limit reached — wait a minute and try again')
-                : suggestions.map((s, i) => React.createElement('div', {
-                    key: i,
-                    style: { padding: '9px 12px', fontSize: 13, borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer', color: 'var(--text)' },
-                    onClick: () => selectSuggestion(s)
-                  },
-                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                      React.createElement('span', null, s.name),
-                      s._source === 'off' && React.createElement('span', { style: { fontSize: 9, padding: '1px 4px', borderRadius: 3, background: 'rgba(96,165,250,0.15)', border: '1px solid rgba(96,165,250,0.4)', color: 'var(--blue)', flexShrink: 0, lineHeight: 1.4 } }, 'Open Foods')
-                    ),
-                    React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 2 } },
-                      `${s.cals100} kcal · P ${s.protein100}g · C ${s.carbs100}g · F ${s.fat100}g per 100g`
-                    )
-                  ))
-            )
-          ),
-          selectedFood
-            ? React.createElement(React.Fragment, null,
-                loadingMeasures
-                  ? React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', padding: '10px 4px' } }, 'Loading serving sizes…')
-                  : servingMeasures
-                    ? React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
-                        React.createElement('div', { className: 'ig', style: { flex: 2 } },
-                          React.createElement('label', { className: 'ilbl' }, 'Serving'),
-                          React.createElement('select', { className: 'inp', value: selectedMeasureIdx, onChange: e => setSelectedMeasureIdx(+e.target.value), style: { appearance: 'auto' } },
-                            ...servingMeasures.map((m, i) => React.createElement('option', { key: i, value: i }, m.text))
-                          )
-                        ),
-                        React.createElement('div', { className: 'ig', style: { flex: 1 } },
-                          React.createElement('label', { className: 'ilbl' }, 'Qty'),
-                          React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '1', value: servingQty, onChange: e => setServingQty(e.target.value) })
-                        )
-                      )
-                    : React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
-                        React.createElement('div', { className: 'ig', style: { flex: 1 } },
-                          React.createElement('label', { className: 'ilbl' }, 'Amount'),
-                          React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '100', value: customAmt, onChange: e => setCustomAmt(e.target.value) })
-                        ),
-                        React.createElement('div', { className: 'ig', style: { flex: 1 } },
-                          React.createElement('label', { className: 'ilbl' }, 'Unit'),
-                          React.createElement('select', { className: 'inp', value: customUnit, onChange: e => setCustomUnit(e.target.value), style: { appearance: 'auto' } },
-                            ...Object.keys(unitFactors).map(u => React.createElement('option', { key: u, value: u }, u))
-                          )
-                        )
-                      ),
-                (() => {
-                  const p = getPreview();
-                  return p ? React.createElement('div', {
-                    style: { background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', marginTop: 6, fontSize: 12, color: 'var(--t2)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }
-                  },
-                    React.createElement('span', null, `${p.grams}g`),
-                    React.createElement('span', { style: { color: 'var(--lime)' } }, `${p.cals} kcal`),
-                    React.createElement('span', null, `P ${p.protein}g`),
-                    React.createElement('span', null, `C ${p.carbs}g`),
-                    React.createElement('span', null, `F ${p.fat}g`)
-                  ) : null;
-                })()
-              )
-            : React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', padding: '10px 4px' } },
-                'Type a food name above to search, or use Quick Add / 📸 Scan Label below.'
+        // Custom Entry card — manual form
+        (() => {
+          const mInp = (key, label, unit, step) => React.createElement('div', { className: 'ig', style: { flex: 1 } },
+            React.createElement('label', { className: 'ilbl' }, `${label}${unit ? ` (${unit})` : ''}`),
+            React.createElement('input', {
+              className: 'inp', type: 'number', inputMode: 'decimal', step: step || 'any', placeholder: '0',
+              value: manualMicros[key] || '',
+              onChange: e => setManualMicros(p => ({ ...p, [key]: e.target.value }))
+            })
+          );
+          return React.createElement('div', { className: 'card' },
+            React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
+            React.createElement('div', { className: 'ig' },
+              React.createElement('label', { className: 'ilbl' }, 'Food Name'),
+              React.createElement('input', { className: 'inp', type: 'text', placeholder: 'e.g. Homemade soup', value: c.name, onChange: e => setC(p => ({ ...p, name: e.target.value })), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'sentences', spellCheck: false })
+            ),
+            React.createElement('div', { style: { display: 'flex', gap: 8 } },
+              React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                React.createElement('label', { className: 'ilbl' }, 'Calories'),
+                React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '0', value: c.cals, onChange: e => setC(p => ({ ...p, cals: e.target.value })) })
               ),
-          React.createElement('button', { className: 'btn full', style: { marginTop: 10 }, onClick: addC }, 'Add Food')
-        )
+              React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                React.createElement('label', { className: 'ilbl' }, 'Protein (g)'),
+                React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '0', value: c.protein, onChange: e => setC(p => ({ ...p, protein: e.target.value })) })
+              )
+            ),
+            React.createElement('div', { style: { display: 'flex', gap: 8 } },
+              React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                React.createElement('label', { className: 'ilbl' }, 'Carbs (g)'),
+                React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '0', value: c.carbs, onChange: e => setC(p => ({ ...p, carbs: e.target.value })) })
+              ),
+              React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                React.createElement('label', { className: 'ilbl' }, 'Fat (g)'),
+                React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '0', value: c.fat, onChange: e => setC(p => ({ ...p, fat: e.target.value })) })
+              )
+            ),
+            React.createElement('div', {
+              style: { display: 'flex', alignItems: 'center', cursor: 'pointer', margin: '10px 0 4px', userSelect: 'none' },
+              onClick: () => setManualShowMicros(v => !v)
+            },
+              React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 } }, 'Micros (optional)'),
+              React.createElement('span', { style: { fontSize: 12, color: 'var(--t3)' } }, manualShowMicros ? '▾' : '▸')
+            ),
+            manualShowMicros && React.createElement(React.Fragment, null,
+              React.createElement('div', { style: { display: 'flex', gap: 8 } }, mInp('fiber', 'Fiber', 'g'), mInp('vitD', 'Vit D', 'IU')),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('vitK', 'Vit K', 'mcg'), mInp('omega3', 'Omega-3', 'mg')),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('magnesium', 'Magnesium', 'mg'), mInp('calcium', 'Calcium', 'mg')),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('zinc', 'Zinc', 'mg', '0.1'), mInp('b12', 'B12', 'mcg', '0.01')),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('vitC', 'Vit C', 'mg'), mInp('potassium', 'Potassium', 'mg')),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('iron', 'Iron', 'mg', '0.1'), mInp('niacin', 'Niacin B3', 'mg', '0.1')),
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('vitE', 'Vit E', 'mg', '0.1'))
+            ),
+            React.createElement('button', { className: 'btn full', style: { marginTop: 10 }, disabled: !c.name.trim() || !c.cals, onClick: addManual }, 'Add Food')
+          );
+        })()
       ),
 
       // ── Supps view ───────────────────────────────────────────
@@ -2816,11 +2809,6 @@ function App() {
     const [keyDraft, setKeyDraft] = React.useState('');
     const [editingKey, setEditingKey] = React.useState(false);
 
-    // ── USDA API key state ─────────────────────────────────────
-    const [usdaKey, setUsdaKey]     = React.useState(localStorage.getItem('fitlife_usda_key') || '');
-    const [usdaDraft, setUsdaDraft] = React.useState('');
-    const [usdaEdit, setUsdaEdit]   = React.useState(false);
-
     // ── Sync state ────────────────────────────────────────────
     const [syncToken, setSyncToken]   = React.useState(localStorage.getItem('fitlife_github_token') || '');
     const [syncDraft, setSyncDraft]   = React.useState('');
@@ -2855,16 +2843,7 @@ function App() {
       ['fitlife_github_token','fitlife_gist_id','fitlife_sync_at'].forEach(k => localStorage.removeItem(k));
       setSyncToken(''); setSyncAt(null); setSyncEdit(false);
     }
-    function _saveUsdaKey() {
-      const k = usdaDraft.trim();
-      if (!k) return;
-      localStorage.setItem('fitlife_usda_key', k);
-      setUsdaKey(k); setUsdaDraft(''); setUsdaEdit(false);
-    }
-    function _clearUsdaKey() {
-      localStorage.removeItem('fitlife_usda_key');
-      setUsdaKey(''); setUsdaEdit(false);
-    }
+
 
     const SUGG = [
       "How do I progress dead hangs to pull-ups?",
@@ -3027,41 +3006,6 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
           onKeyDown: e => e.key === 'Enter' && send()
         }),
         React.createElement('button', { className: 'btn', onClick: () => send(), disabled: loading || !input.trim() }, 'Send')
-      ),
-
-      // ── Food Search / USDA key card ───────────────────────────
-      React.createElement('div', { className: 'card', style: { margin: '10px 16px 0' } },
-        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
-          React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '🔍 Food Search'),
-          usdaKey && !usdaEdit
-            ? React.createElement('span', { style: { fontSize: 11, color: 'var(--lime)' } }, '✓ USDA key set')
-            : null
-        ),
-        (!usdaKey || usdaEdit)
-          ? React.createElement(React.Fragment, null,
-              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', lineHeight: 1.55, marginBottom: 10 } },
-                'Searches use USDA + Open Food Facts in parallel for best restaurant and packaged food coverage. A free USDA API key removes the 30 req/hr rate limit. Register at ',
-                React.createElement('a', { href: 'https://fdc.nal.usda.gov/api-key-signup', target: '_blank', style: { color: 'var(--blue)' } }, 'fdc.nal.usda.gov'),
-                ' (instant, free forever).'
-              ),
-              React.createElement('div', { className: 'ig' },
-                React.createElement('label', { className: 'ilbl' }, 'USDA API Key (optional)'),
-                React.createElement('input', { className: 'inp', type: 'password', placeholder: 'Paste key here…', value: usdaDraft, onChange: e => setUsdaDraft(e.target.value) })
-              ),
-              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
-                usdaEdit && React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => { setUsdaEdit(false); setUsdaDraft(''); } }, 'Cancel'),
-                React.createElement('button', { className: 'btn', style: { flex: 1, justifyContent: 'center', fontSize: 13 }, disabled: !usdaDraft.trim(), onClick: _saveUsdaKey }, 'Save Key')
-              )
-            )
-          : React.createElement(React.Fragment, null,
-              React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', marginBottom: 10 } },
-                'USDA + Open Food Facts searched in parallel. Best coverage for restaurants, chains, packaged goods, and whole foods.'
-              ),
-              React.createElement('div', { style: { display: 'flex', gap: 8 } },
-                React.createElement('button', { className: 'btn ghost', style: { fontSize: 13 }, onClick: () => { setUsdaEdit(true); setUsdaDraft(''); } }, '🔑 Update Key'),
-                React.createElement('button', { className: 'btn ghost', style: { fontSize: 13, color: 'var(--t3)' }, onClick: _clearUsdaKey }, '✕ Remove')
-              )
-            )
       ),
 
       // ── Sync settings card ────────────────────────────────────
