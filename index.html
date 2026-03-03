@@ -1454,6 +1454,7 @@ function App() {
     const [editingFoodId, setEditingFoodId] = React.useState(null);
     const [editDraft, setEditDraft] = React.useState({ name: '', defaultGrams: '', cals: '', protein: '', carbs: '', fat: '', fiber: '', vitD: '', vitK: '', omega3: '', magnesium: '', calcium: '', zinc: '', b12: '', vitC: '', potassium: '', iron: '', niacin: '', vitE: '' });
     const [editShowMicros, setEditShowMicros] = React.useState(false);
+    const [manualGrams, setManualGrams]           = React.useState('');
     const [manualMicros, setManualMicros]         = React.useState({});
     const [manualShowMicros, setManualShowMicros] = React.useState(false);
 
@@ -2060,10 +2061,19 @@ function App() {
     const addManual = () => {
       const name = c.name.trim();
       if (!name || !c.cals) return;
+      const grams = parseFloat(manualGrams) || 100;
+      const scale100 = 100 / grams;
       const micros = {};
       Object.entries(manualMicros).forEach(([k, v]) => { const n = parseFloat(v); if (!isNaN(n) && n > 0) micros[k] = n; });
-      add({ name, cals: +(c.cals || 0), protein: +(c.protein || 0), carbs: +(c.carbs || 0), fat: +(c.fat || 0), micros });
+      const cals = +(c.cals || 0), protein = +(c.protein || 0), carbs = +(c.carbs || 0), fat = +(c.fat || 0);
+      const logName = `${name} (${grams}g)`;
+      add({ name: logName, cals, protein, carbs, fat, micros });
+      // Store per-100g so Quick Add re-scales correctly to any serving size
+      const micros100 = {};
+      Object.entries(micros).forEach(([k, v]) => { micros100[k] = +( v * scale100).toFixed(['b12','vitK','fiber','zinc','iron','niacin','vitE'].includes(k) ? 1 : 0); });
+      saveToMyFoods({ name, cals100: +(cals * scale100).toFixed(1), protein100: +(protein * scale100).toFixed(1), carbs100: +(carbs * scale100).toFixed(1), fat100: +(fat * scale100).toFixed(1), defaultGrams: grams, defaultUnit: 'g', micros100, fdcId: null, barcode: null });
       setC({ name: '', cals: '', protein: '', fat: '', carbs: '' });
+      setManualGrams('');
       setManualMicros({});
       setManualShowMicros(false);
     };
@@ -2408,9 +2418,15 @@ function App() {
           );
           return React.createElement('div', { className: 'card' },
             React.createElement('div', { className: 'clbl' }, 'Custom Entry'),
-            React.createElement('div', { className: 'ig' },
-              React.createElement('label', { className: 'ilbl' }, 'Food Name'),
-              React.createElement('input', { className: 'inp', type: 'text', placeholder: 'e.g. Homemade soup', value: c.name, onChange: e => setC(p => ({ ...p, name: e.target.value })), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'sentences', spellCheck: false })
+            React.createElement('div', { style: { display: 'flex', gap: 8 } },
+              React.createElement('div', { className: 'ig', style: { flex: 3 } },
+                React.createElement('label', { className: 'ilbl' }, 'Food Name'),
+                React.createElement('input', { className: 'inp', type: 'text', placeholder: 'e.g. Homemade soup', value: c.name, onChange: e => setC(p => ({ ...p, name: e.target.value })), autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'sentences', spellCheck: false })
+              ),
+              React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                React.createElement('label', { className: 'ilbl' }, 'Grams'),
+                React.createElement('input', { className: 'inp', type: 'number', inputMode: 'decimal', placeholder: '100', value: manualGrams, onChange: e => setManualGrams(e.target.value) })
+              )
             ),
             React.createElement('div', { style: { display: 'flex', gap: 8 } },
               React.createElement('div', { className: 'ig', style: { flex: 1 } },
