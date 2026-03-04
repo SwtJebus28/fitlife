@@ -3055,6 +3055,10 @@ function App() {
     const [syncStatus, setSyncStatus] = React.useState(window._FitSync ? window._FitSync.getStatus() : 'idle');
     const [syncAt, setSyncAt]         = React.useState(localStorage.getItem('fitlife_sync_at'));
     const [syncEdit, setSyncEdit]     = React.useState(false);
+    const [coachView, setCoachView]   = React.useState('chat');
+    const nutrition = React.useMemo(() => {
+      try { return JSON.parse(localStorage.getItem('nutrition') || '[]'); } catch(e) { return []; }
+    }, []);
 
     React.useEffect(() => {
       if (!window._FitSync) return;
@@ -3161,18 +3165,32 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
       setLoading(false);
     };
 
-    // ── API key setup screen ──────────────────────────────────
-    if (!apiKey || editingKey) {
-      return React.createElement('div', null,
-        React.createElement('div', { className: 'ph' },
-          React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
-            React.createElement('div', null,
-              React.createElement('div', { className: 'ph-title' }, 'COACH'),
-              React.createElement('div', { className: 'ph-sub' }, 'AI · knows your full profile')
-            ),
+    // ── Coach interface ───────────────────────────────────────
+    const _chatSetup = !apiKey || editingKey;
+    return React.createElement('div', null,
+      React.createElement('div', { className: 'ph' },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+          React.createElement('div', null,
+            React.createElement('div', { className: 'ph-title' }, 'COACH'),
+            React.createElement('div', { className: 'ph-sub' }, 'AI · knows your full profile')
+          ),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+            !_chatSetup && React.createElement('button', {
+              onClick: () => { setEditingKey(true); setKeyDraft(''); },
+              style: { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', opacity: 0.5 },
+              title: 'Update API key'
+            }, '🔑'),
             React.createElement('div', { style: { fontSize: 32 } }, '🤖')
           )
-        ),
+        )
+      ),
+      React.createElement('div', { className: 'tabs' },
+        React.createElement('div', { className: `tab ${coachView === 'chat' ? 'on' : ''}`, onClick: () => setCoachView('chat') }, 'Chat'),
+        React.createElement('div', { className: `tab ${coachView === 'reports' ? 'on' : ''}`, onClick: () => setCoachView('reports') }, 'Reports'),
+      ),
+
+      // ── Chat tab: API key setup ───────────────────────────────
+      coachView === 'chat' && _chatSetup && React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'card', style: { marginTop: 16 } },
           React.createElement('div', { className: 'clbl' }, '🔑 Anthropic API Key'),
           React.createElement('div', { className: 'co amber', style: { margin: '0 0 14px' } },
@@ -3185,14 +3203,10 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
           React.createElement('div', { className: 'ig' },
             React.createElement('label', { className: 'ilbl' }, 'API Key (starts with sk-ant-)'),
             React.createElement('input', {
-              className: 'inp',
-              type: 'password',
-              placeholder: 'sk-ant-...',
-              value: keyDraft,
-              onChange: e => setKeyDraft(e.target.value),
+              className: 'inp', type: 'password', placeholder: 'sk-ant-...',
+              value: keyDraft, onChange: e => setKeyDraft(e.target.value),
               onKeyDown: e => e.key === 'Enter' && saveKey(),
-              autoComplete: 'off',
-              spellCheck: false,
+              autoComplete: 'off', spellCheck: false,
             })
           ),
           React.createElement('div', { style: { display: 'flex', gap: 10 } },
@@ -3206,47 +3220,179 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
           React.createElement('a', { href: 'https://console.anthropic.com', target: '_blank', style: { color: 'var(--blue)' } }, 'console.anthropic.com'),
           ' → API Keys → Create Key. New accounts include free credits.'
         )
-      );
-    }
-
-    // ── Main chat interface ───────────────────────────────────
-    return React.createElement('div', null,
-      React.createElement('div', { className: 'ph' },
-        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
-          React.createElement('div', null,
-            React.createElement('div', { className: 'ph-title' }, 'COACH'),
-            React.createElement('div', { className: 'ph-sub' }, 'AI · knows your full profile')
-          ),
-          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
-            React.createElement('button', {
-              onClick: () => { setEditingKey(true); setKeyDraft(''); },
-              style: { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', opacity: 0.5 },
-              title: 'Update API key'
-            }, '🔑'),
-            React.createElement('div', { style: { fontSize: 32 } }, '🤖')
-          )
-        )
       ),
-      msgs.length <= 1 && React.createElement('div', { style: { padding: '10px 16px 0', display: 'flex', flexWrap: 'wrap' } },
+
+      // ── Chat tab: messages ────────────────────────────────────
+      coachView === 'chat' && !_chatSetup && msgs.length <= 1 && React.createElement('div', { style: { padding: '10px 16px 0', display: 'flex', flexWrap: 'wrap' } },
         SUGG.map((s, i) => React.createElement('span', { key: i, className: 'pill', onClick: () => send(s) }, s))
       ),
-      React.createElement('div', { style: { padding: '12px 16px 0' } },
+      coachView === 'chat' && !_chatSetup && React.createElement('div', { style: { padding: '12px 16px 0' } },
         msgs.map((m, i) => React.createElement('div', { key: i, className: `bubble fade ${m.role === 'user' ? 'user' : ''}` }, m.text)),
         loading && React.createElement('div', { className: 'bubble' },
           React.createElement('span', { className: 'spin', style: { width: 14, height: 14 } }),
           React.createElement('span', { style: { fontSize: 12, color: 'var(--t2)', marginLeft: 8 } }, 'Thinking...')
         )
       ),
-      React.createElement('div', { style: { padding: '10px 16px', display: 'flex', gap: 8, position: 'sticky', bottom: 'calc(var(--nav) + 6px)' } },
+      coachView === 'chat' && !_chatSetup && React.createElement('div', { style: { padding: '10px 16px', display: 'flex', gap: 8, position: 'sticky', bottom: 'calc(var(--nav) + 6px)' } },
         React.createElement('input', {
-          className: 'inp',
-          placeholder: 'Ask anything...',
-          value: input,
-          onChange: e => setInput(e.target.value),
+          className: 'inp', placeholder: 'Ask anything...',
+          value: input, onChange: e => setInput(e.target.value),
           onKeyDown: e => e.key === 'Enter' && send()
         }),
         React.createElement('button', { className: 'btn', onClick: () => send(), disabled: loading || !input.trim() }, 'Send')
       ),
+
+      // ── Reports tab ───────────────────────────────────────────
+      coachView === 'reports' && (() => {
+        const _td = new Date().toDateString();
+        // 35-day compliance heatmap
+        const heatDays = Array.from({ length: 35 }, (_, i) => {
+          const d = new Date(); d.setDate(d.getDate() - (34 - i));
+          const ds = d.toDateString();
+          const rec = nutrition.find(n => n.date === ds);
+          const cals = rec?.cals || 0, pct = cals / USER.targetCals;
+          return { ds, cals, pct, isToday: ds === _td,
+            bg: cals < 50 ? 'var(--s2)' : pct >= 0.9 && pct <= 1.1 ? 'var(--ld)' : pct > 1.1 ? 'var(--rd)' : 'var(--ad)' };
+        });
+        const loggedN   = heatDays.filter(d => d.cals >= 50).length;
+        const onTargetN = heatDays.filter(d => d.cals >= 50 && d.pct >= 0.9 && d.pct <= 1.1).length;
+        // 14-day macro trend
+        const BAR_H = 56;
+        const trend14 = Array.from({ length: 14 }, (_, i) => {
+          const d = new Date(); d.setDate(d.getDate() - (13 - i));
+          const ds = d.toDateString();
+          const rec = nutrition.find(n => n.date === ds);
+          const cals = rec?.cals || 0, protein = rec?.protein || 0;
+          return {
+            lbl: d.toLocaleDateString('en-US', { weekday: 'short' }).charAt(0) + d.getDate(),
+            cals, protein, isToday: ds === _td,
+            calH: cals > 50 ? Math.max(Math.min(cals / USER.targetCals, 1.25) * BAR_H, 3) : 0,
+            protH: protein > 0 ? Math.max(Math.min(protein / USER.protein, 1.25) * BAR_H, 3) : 0,
+            calColor: cals < 50 ? 'var(--border)' : cals / USER.targetCals > 1.1 ? 'var(--red)' : cals / USER.targetCals < 0.9 ? 'var(--amber)' : 'var(--lime)',
+          };
+        });
+        // 7-day micro averages
+        const _MR = { fiber:30, vitD:600, vitK:120, omega3:1600, magnesium:420, calcium:1000, zinc:11, b12:2.4, vitC:90, potassium:3400, iron:8, niacin:16, vitE:15 };
+        const _ML = { fiber:'Fiber', vitD:'Vit D', vitK:'Vit K', omega3:'Omega-3', magnesium:'Magnesium', calcium:'Calcium', zinc:'Zinc', b12:'B12', vitC:'Vit C', potassium:'Potassium', iron:'Iron', niacin:'Niacin', vitE:'Vit E' };
+        const _MU = { fiber:'g', vitD:'IU', vitK:'mcg', omega3:'mg', magnesium:'mg', calcium:'mg', zinc:'mg', b12:'mcg', vitC:'mg', potassium:'mg', iron:'mg', niacin:'mg', vitE:'mg' };
+        const last7 = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const rec = nutrition.find(n => n.date === d.toDateString());
+          if (rec?.cals > 50) last7.push(rec);
+        }
+        const microAvgs = Object.keys(_MR).map(k => {
+          const days = last7.filter(r => (r.micros?.[k] || 0) > 0);
+          const avg = days.length ? days.reduce((s, r) => s + r.micros[k], 0) / days.length : 0;
+          const rda = _MR[k], unit = _MU[k], pct = Math.min(avg / rda, 1);
+          const fmtV = unit === 'g' ? avg.toFixed(1) : unit === 'mcg' ? avg.toFixed(1) : String(Math.round(avg));
+          return { k, label: _ML[k], unit, rda, pct, fmtV, fmtR: String(rda) };
+        }).sort((a, b) => a.pct - b.pct);
+        // 30-day habits
+        const last30 = [];
+        for (let i = 0; i < 30; i++) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          const rec = nutrition.find(n => n.date === d.toDateString());
+          if (rec) last30.push(rec);
+        }
+        const loggedDays30 = last30.filter(r => r.cals > 50);
+        const isComp = r => { const p = r.cals / USER.targetCals; return p >= 0.9 && p <= 1.1; };
+        const overallComp = loggedDays30.length ? loggedDays30.filter(isComp).length / loggedDays30.length : 0;
+        const habitData = [
+          { key: 'water', label: 'Hydrated', emoji: '💧' },
+          { key: 'fasting', label: 'Fasted', emoji: '⏱' },
+          { key: 'alcohol', label: 'Alcohol', emoji: '🍷' },
+          { key: 'other', label: 'Other', emoji: '📝' },
+        ].map(f => {
+          const flagDays = last30.filter(r => r.flags?.[f.key] && r.cals > 50);
+          const flagComp = flagDays.length ? flagDays.filter(isComp).length / flagDays.length : null;
+          return { ...f, count: last30.filter(r => r.flags?.[f.key]).length, flagComp };
+        });
+        return React.createElement(React.Fragment, null,
+          // 1. Compliance heatmap
+          React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+              React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '35-Day Compliance'),
+              loggedN > 0 && React.createElement('span', { style: { fontSize: 12, color: 'var(--t3)' } }, `${onTargetN}/${loggedN} days on target`)
+            ),
+            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 } },
+              ...['S','M','T','W','T','F','S'].map((lbl, i) =>
+                React.createElement('div', { key: 'h'+i, style: { fontSize: 9, color: 'var(--t3)', textAlign: 'center', paddingBottom: 2, letterSpacing: '.5px' } }, lbl)
+              ),
+              ...heatDays.map((d, i) =>
+                React.createElement('div', { key: i, title: `${d.cals} cal`,
+                  style: { height: 22, borderRadius: 4, background: d.bg,
+                    border: d.isToday ? '2px solid var(--lime)' : '1px solid var(--border)',
+                    opacity: d.cals < 50 ? 0.4 : 1 } })
+              )
+            ),
+            React.createElement('div', { style: { display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' } },
+              ...[['var(--ld)','On target (±10%)'],['var(--rd)','Over'],['var(--ad)','Under'],['var(--s2)','Not logged']].map(([bg, lbl], i) =>
+                React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--t3)' } },
+                  React.createElement('div', { style: { width: 10, height: 10, borderRadius: 2, background: bg } }), lbl)
+              )
+            )
+          ),
+          // 2. 14-day macro trend
+          React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+            React.createElement('div', { className: 'clbl' }, '14-Day Macro Trend'),
+            React.createElement('div', { style: { display: 'flex', gap: 3, alignItems: 'flex-end', overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' } },
+              ...trend14.map((day, i) =>
+                React.createElement('div', { key: i, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flex: '0 0 auto', width: 30 } },
+                  React.createElement('div', { style: { display: 'flex', gap: 2, alignItems: 'flex-end', height: BAR_H } },
+                    React.createElement('div', { title: `${day.cals} cal`,
+                      style: { width: 11, height: day.calH || 2, background: day.calColor, borderRadius: '3px 3px 0 0', alignSelf: 'flex-end' } }),
+                    React.createElement('div', { title: `${day.protein}g protein`,
+                      style: { width: 11, height: day.protH || 2, background: day.protein > 0 ? 'var(--blue)' : 'var(--border)', borderRadius: '3px 3px 0 0', alignSelf: 'flex-end', opacity: 0.75 } }),
+                  ),
+                  React.createElement('div', { style: { fontSize: 8, color: day.isToday ? 'var(--lime)' : 'var(--t3)', marginTop: 2, userSelect: 'none' } }, day.lbl)
+                )
+              )
+            ),
+            React.createElement('div', { style: { display: 'flex', gap: 14, marginTop: 6, flexWrap: 'wrap' } },
+              ...[['var(--lime)','Cals on target'],['var(--amber)','Cals under'],['var(--red)','Cals over'],['rgba(63,184,245,.75)','Protein']].map(([bg, lbl], i) =>
+                React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--t3)' } },
+                  React.createElement('div', { style: { width: 10, height: 10, borderRadius: 2, background: bg } }), lbl)
+              )
+            )
+          ),
+          // 3. 7-day micro gaps
+          React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: last7.length ? 10 : 4 } },
+              React.createElement('div', { className: 'clbl', style: { margin: 0 } }, '7-Day Micro Gaps'),
+              React.createElement('span', { style: { fontSize: 12, color: 'var(--t3)' } }, last7.length ? `${last7.length} days data` : 'No data yet')
+            ),
+            last7.length > 0
+              ? microAvgs.map(m =>
+                  React.createElement('div', { key: m.k, className: 'mr', style: { marginBottom: 6 } },
+                    React.createElement('span', { className: 'mn' }, m.label),
+                    React.createElement('div', { className: 'mb' },
+                      React.createElement('div', { className: 'mf', style: { width: `${m.pct * 100}%`,
+                        background: m.pct < 0.5 ? 'var(--red)' : m.pct < 0.8 ? 'var(--amber)' : 'var(--lime)' } })
+                    ),
+                    React.createElement('span', { className: 'mv' }, `${m.fmtV}/${m.fmtR}${m.unit}`)
+                  )
+                )
+              : React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', padding: '4px 0 8px' } }, 'Log foods with micro data to see gaps.')
+          ),
+          // 4. 30-day habits
+          React.createElement('div', { className: 'card', style: { marginTop: 10 } },
+            React.createElement('div', { className: 'clbl' }, '30-Day Habits'),
+            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } },
+              ...habitData.map(h =>
+                React.createElement('div', { key: h.key, style: { background: 'var(--s2)', borderRadius: 8, padding: '10px 12px' } },
+                  React.createElement('div', { style: { fontSize: 18, marginBottom: 2 } }, h.emoji),
+                  React.createElement('div', { style: { fontSize: 13, fontWeight: 600 } }, h.label),
+                  React.createElement('div', { style: { fontSize: 12, color: 'var(--t3)', marginTop: 2 } }, `${h.count}/30 days`),
+                  h.flagComp !== null && loggedDays30.length >= 5 && React.createElement('div', {
+                    style: { fontSize: 11, color: h.flagComp >= overallComp ? 'var(--lime)' : 'var(--red)', marginTop: 4 }
+                  }, `${h.flagComp >= overallComp ? '↑' : '↓'} ${Math.round(h.flagComp * 100)}% compliance`)
+                )
+              )
+            )
+          )
+        );
+      })(),
 
       // ── Sync settings card ────────────────────────────────────
       React.createElement('div', { className: 'card', style: { margin: '10px 16px 0' } },
