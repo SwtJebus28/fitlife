@@ -2058,6 +2058,31 @@ function App() {
       setSuggestions([]);
     };
 
+    // ── % DV / unit conversion for micro inputs ───────────────
+    const _MICRO_DV = { fiber: 28, vitD: 800, vitK: 120, magnesium: 420, calcium: 1300, zinc: 11, b12: 2.4, vitC: 90, potassium: 4700, iron: 18, niacin: 16, vitE: 15 };
+    const _MICRO_KEYS = new Set([...Object.keys(_MICRO_DV), 'omega3']);
+    // Returns the converted numeric value (as a string) if a recognised suffix is found,
+    // otherwise returns raw unchanged so normal numeric parsing still works.
+    const parseMicroInput = (key, raw) => {
+      const s = (raw || '').toString().trim();
+      if (!s) return raw;
+      // Vitamin D: mcg / µg / ug → IU (1 mcg = 40 IU); mg → IU (1 mg = 40 000 IU)
+      if (key === 'vitD') {
+        const mcg = s.match(/^([\d.]+)\s*(?:mcg|µg|ug)$/i);
+        if (mcg) return String(Math.round(parseFloat(mcg[1]) * 40));
+        const mg  = s.match(/^([\d.]+)\s*mg$/i);
+        if (mg)  return String(Math.round(parseFloat(mg[1])  * 40000));
+      }
+      // % DV → native unit for any micro with a known DV
+      const pct = s.match(/^([\d.]+)\s*%$/);
+      if (pct && _MICRO_DV[key]) {
+        const val = parseFloat(pct[1]) / 100 * _MICRO_DV[key];
+        const dec = key === 'b12' ? 2 : ['fiber','vitK','zinc','iron','niacin','vitE'].includes(key) ? 1 : 0;
+        return String(+val.toFixed(dec));
+      }
+      return raw;
+    };
+
     const addManual = () => {
       const name = c.name.trim();
       if (!name || !c.cals) return;
@@ -2318,13 +2343,17 @@ function App() {
               if (!ef) return null;
               // cals draft is already per-serving — show it directly
               const calPreview = parseFloat(editDraft.cals) > 0 ? Math.round(parseFloat(editDraft.cals)) : null;
-              const inp = (key, label, unit, step) => React.createElement('div', { className: 'ig', style: { flex: 1 } },
-                React.createElement('label', { className: 'ilbl' }, `${label}${unit ? ` (${unit})` : ''}`),
-                React.createElement('input', {
-                  className: 'inp', type: 'number', inputMode: 'decimal', step: step || 'any', placeholder: '0',
-                  value: editDraft[key], onChange: e => setEditDraft(p => ({ ...p, [key]: e.target.value }))
-                })
-              );
+              const inp = (key, label, unit, step) => {
+                const isMicro = _MICRO_KEYS.has(key);
+                return React.createElement('div', { className: 'ig', style: { flex: 1 } },
+                  React.createElement('label', { className: 'ilbl' }, `${label}${unit ? ` (${unit})` : ''}`),
+                  React.createElement('input', {
+                    className: 'inp', type: isMicro ? 'text' : 'number', inputMode: 'decimal', step: step || 'any', placeholder: '0',
+                    value: editDraft[key], onChange: e => setEditDraft(p => ({ ...p, [key]: e.target.value })),
+                    ...(isMicro ? { onBlur: e => { const cv = parseMicroInput(key, e.target.value); if (cv !== e.target.value) setEditDraft(p => ({ ...p, [key]: cv })); } } : {})
+                  })
+                );
+              };
               return React.createElement('div', { className: 'card' },
                 // Header
                 React.createElement('div', { style: { display: 'flex', alignItems: 'center', marginBottom: 10 } },
@@ -2411,9 +2440,13 @@ function App() {
           const mInp = (key, label, unit, step) => React.createElement('div', { className: 'ig', style: { flex: 1 } },
             React.createElement('label', { className: 'ilbl' }, `${label}${unit ? ` (${unit})` : ''}`),
             React.createElement('input', {
-              className: 'inp', type: 'number', inputMode: 'decimal', step: step || 'any', placeholder: '0',
+              className: 'inp', type: 'text', inputMode: 'decimal', step: step || 'any', placeholder: '0',
               value: manualMicros[key] || '',
-              onChange: e => setManualMicros(p => ({ ...p, [key]: e.target.value }))
+              onChange: e => setManualMicros(p => ({ ...p, [key]: e.target.value })),
+              onBlur: e => {
+                const converted = parseMicroInput(key, e.target.value);
+                if (converted !== e.target.value) setManualMicros(p => ({ ...p, [key]: converted }));
+              }
             })
           );
           return React.createElement('div', { className: 'card' },
@@ -2462,7 +2495,9 @@ function App() {
               React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('zinc', 'Zinc', 'mg', '0.1'), mInp('b12', 'B12', 'mcg', '0.01')),
               React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('vitC', 'Vit C', 'mg'), mInp('potassium', 'Potassium', 'mg')),
               React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('iron', 'Iron', 'mg', '0.1'), mInp('niacin', 'Niacin B3', 'mg', '0.1')),
-              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('vitE', 'Vit E', 'mg', '0.1'))
+              React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 8 } }, mInp('vitE', 'Vit E', 'mg', '0.1')),
+              React.createElement('div', { style: { fontSize: 11, color: 'var(--t3)', marginTop: 8, lineHeight: 1.5 } },
+                '💡 Tip: enter 4% to auto-convert from % Daily Value. For Vit D, enter 2mcg or 2mg to convert to IU.')
             ),
             React.createElement('button', { className: 'btn full', style: { marginTop: 10 }, disabled: !c.name.trim() || !c.cals, onClick: addManual }, 'Add Food')
           );
