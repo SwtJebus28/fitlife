@@ -176,6 +176,11 @@ body{font-family:var(--fb);color:var(--text);-webkit-font-smoothing:antialiased;
 .dn{font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
 .dd{font-family:var(--fd);font-size:22px;line-height:1}
 .dot{width:4px;height:4px;border-radius:50%;background:var(--lime)}
+.dc.selected{background:var(--bd);border-color:var(--blue)}
+.week-nav{display:flex;align-items:center;gap:0}.week-nav .week{flex:1}.week-nav-btn{background:none;border:none;color:var(--t3);font-size:22px;padding:8px 4px;cursor:pointer;flex-shrink:0;line-height:1;-webkit-tap-highlight-color:transparent}.week-nav-btn:disabled{opacity:.2;cursor:default}
+.date-banner{display:flex;align-items:center;justify-content:space-between;margin:6px 16px 0;padding:7px 12px;background:var(--bd);border-radius:var(--rs);border:1px solid rgba(63,184,245,.25)}
+.date-banner-label{font-size:13px;color:var(--blue);font-weight:500}
+.date-banner-btn{background:none;border:none;font-size:12px;color:var(--blue);cursor:pointer;padding:0;font-weight:500;text-decoration:underline}
 .pb{margin:12px 16px 0;border-radius:var(--r);padding:14px 16px;background:linear-gradient(135deg,var(--s2),rgba(200,241,53,.05));border:1px solid var(--lb);display:flex;align-items:center;gap:14px}
 .dlb{margin:12px 16px 0;border-radius:var(--r);padding:14px 16px;background:var(--ad);border:1px solid rgba(245,168,63,.28);display:flex;align-items:flex-start;gap:12px}
 .pring{transform:rotate(-90deg)}
@@ -774,6 +779,160 @@ function App() {
   return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("style", null, STYLE), /* @__PURE__ */ React.createElement("div", { className: "app" }, /* @__PURE__ */ React.createElement("div", { className: "main" }, tab === "home" && /* @__PURE__ */ React.createElement(Dashboard, { history, nutrition, setTab }), tab === "strength" && /* @__PURE__ */ React.createElement(StrengthTab, { history, setHistory, weights, setWeights }), tab === "cardio" && /* @__PURE__ */ React.createElement(CardioTab, { history, setHistory }), tab === "mobility" && /* @__PURE__ */ React.createElement(MobilityTab, null), tab === "nutrition" && /* @__PURE__ */ React.createElement(NutritionTab, { nutrition, setNutrition }), tab === "coach" && /* @__PURE__ */ React.createElement(CoachTab, { history, weights })), /* @__PURE__ */ React.createElement("nav", { className: "nav" }, TABS.map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, className: `nb ${tab === t.id ? "on" : ""}`, onClick: () => setTab(t.id) }, t.ic, /* @__PURE__ */ React.createElement("span", null, t.lbl))))));
 }
 
+  </script>
+
+  <script>
+  // ============================================================
+  // Sprint 5a — WeekStrip component + Dashboard override
+  // ============================================================
+
+  // Shared week strip — used by both Dashboard (navigate to date) and FuelTab (select date)
+  function WeekStrip({ offset, maxOffset, onOffsetChange, selectedDate, onSelect, nutrition }) {
+    const today = new Date();
+    const curSow = new Date(today);
+    curSow.setDate(today.getDate() - today.getDay());
+    curSow.setHours(0, 0, 0, 0);
+    const dispSow = new Date(curSow);
+    dispSow.setDate(curSow.getDate() + offset * 7);
+    const _days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+    const week = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(dispSow);
+      d.setDate(dispSow.getDate() + i);
+      return {
+        name: _days[i], num: d.getDate(), dateStr: d.toDateString(),
+        isToday:    d.toDateString() === today.toDateString(),
+        hasData:    (nutrition || []).some(n => n.date === d.toDateString() && (n.cals || 0) > 0),
+        isSelected: !!(selectedDate && d.toDateString() === selectedDate),
+      };
+    });
+    return React.createElement('div', { className: 'week-nav' },
+      React.createElement('button', {
+        className: 'week-nav-btn', disabled: offset <= -maxOffset,
+        onClick: () => onOffsetChange(offset - 1), 'aria-label': 'Previous week'
+      }, '‹'),
+      React.createElement('div', { className: 'week' },
+        ...week.map(d =>
+          React.createElement('div', {
+            key: d.name,
+            className: ['dc',
+              d.isToday ? 'today' : '',
+              d.isSelected && !d.isToday ? 'selected' : '',
+              d.hasData && !d.isToday && !d.isSelected ? 'trained' : '',
+            ].filter(Boolean).join(' '),
+            style: { cursor: 'pointer' },
+            onClick: () => onSelect(d.dateStr),
+          },
+            React.createElement('span', { className: 'dn' }, d.name),
+            React.createElement('span', { className: 'dd' }, d.num),
+            d.isToday && React.createElement('span', { className: 'dot' })
+          )
+        )
+      ),
+      React.createElement('button', {
+        className: 'week-nav-btn', disabled: offset >= maxOffset,
+        onClick: () => onOffsetChange(offset + 1), 'aria-label': 'Next week'
+      }, '›')
+    );
+  }
+
+  // Dashboard override — adds tappable week cells + ±2 week navigation
+  // Tapping any day sets window._fitNavDate and navigates to the Fuel tab
+  function Dashboard({ history, nutrition, setTab }) {
+    const [weekOffset, setWeekOffset] = React.useState(0);
+    const today = new Date();
+    const tl = nutrition.find(n => n.date === today.toDateString()) || { cals: 0, protein: 0, fat: 0, carbs: 0 };
+    const now = new Date(), sow = new Date(now);
+    sow.setDate(now.getDate() - now.getDay());
+    sow.setHours(0, 0, 0, 0);
+    const wkStr   = history.filter(h => h.type === 'strength' && new Date(h.date) >= sow).length;
+    const totSess = history.filter(h => h.type === 'strength').length;
+    const deload  = needsDeload(history);
+    const lastW   = history.filter(h => h.type === 'strength')[0];
+    const nextW   = (lastW && lastW.workout === 'A') ? 'B' : 'A';
+
+    return React.createElement('div', null,
+      React.createElement('div', { className: 'ph' },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+          React.createElement('div', null,
+            React.createElement('div', { className: 'ph-title' }, 'TODAY'),
+            React.createElement('div', { className: 'ph-sub' }, today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }))
+          ),
+          React.createElement('div', { style: { textAlign: 'right' } },
+            React.createElement('div', { style: { fontSize: 9, color: 'var(--t3)', letterSpacing: '.8px' } }, 'WEEK'),
+            React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 32, color: 'var(--lime)', lineHeight: 1 } }, Math.ceil((totSess + 1) / 3))
+          )
+        )
+      ),
+      React.createElement(WeekStrip, {
+        offset: weekOffset, maxOffset: 2, onOffsetChange: setWeekOffset,
+        selectedDate: null,
+        onSelect: (dateStr) => { window._fitNavDate = dateStr; setTab('nutrition'); },
+        nutrition,
+      }),
+      deload && React.createElement('div', { className: 'dlb' },
+        React.createElement('span', { style: { fontSize: 20 } }, '\u{1F504}'),
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontWeight: 700, color: 'var(--amber)', marginBottom: 3 } }, 'Deload Week'),
+          React.createElement('div', { style: { fontSize: 12, color: 'var(--t2)' } }, 'Reduce weights ~40% this week. Your body needs it.')
+        )
+      ),
+      React.createElement('div', { className: 'card' },
+        React.createElement('div', { className: 'clbl' }, 'Nutrition Today'),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+          React.createElement(Ring, { value: tl.cals, max: USER.targetCals, size: 88, stroke: 8, color: 'var(--lime)' },
+            React.createElement('div', { style: { fontFamily: 'var(--fd)', fontSize: 18, lineHeight: 1 } }, tl.cals),
+            React.createElement('div', { style: { fontSize: 10, color: 'var(--t3)' } }, '/', USER.targetCals)
+          ),
+          React.createElement('div', { style: { flex: 1 } },
+            React.createElement('div', { className: 'mr' },
+              React.createElement('span', { className: 'mn' }, 'Protein'),
+              React.createElement('div', { className: 'mb' }, React.createElement('div', { className: 'mf', style: { width: `${Math.min(tl.protein / USER.protein * 100, 100)}%`, background: 'var(--blue)' } })),
+              React.createElement('span', { className: 'mv' }, tl.protein, '/', USER.protein, 'g')
+            ),
+            React.createElement('div', { className: 'mr' },
+              React.createElement('span', { className: 'mn' }, 'Carbs'),
+              React.createElement('div', { className: 'mb' }, React.createElement('div', { className: 'mf', style: { width: `${Math.min(tl.carbs / USER.carbs * 100, 100)}%`, background: 'var(--purple)' } })),
+              React.createElement('span', { className: 'mv' }, tl.carbs, '/', USER.carbs, 'g')
+            ),
+            React.createElement('div', { className: 'mr' },
+              React.createElement('span', { className: 'mn' }, 'Fat'),
+              React.createElement('div', { className: 'mb' }, React.createElement('div', { className: 'mf', style: { width: `${Math.min(tl.fat / USER.fat * 100, 100)}%`, background: 'var(--amber)' } })),
+              React.createElement('span', { className: 'mv' }, tl.fat, '/', USER.fat, 'g')
+            )
+          )
+        ),
+        React.createElement('button', { className: 'btn sm full', style: { marginTop: 12 }, onClick: () => setTab('nutrition') }, '+ Log Food')
+      ),
+      React.createElement('div', { className: 'sg' },
+        React.createElement('div', { className: 'sc', onClick: () => setTab('strength') },
+          React.createElement('div', { className: 'sv', style: { color: 'var(--lime)' } }, wkStr, React.createElement('span', { className: 'su' }, '/3')),
+          React.createElement('div', { className: 'sl' }, 'Lifts This Week')
+        ),
+        React.createElement('div', { className: 'sc' },
+          React.createElement('div', { className: 'sv' }, totSess),
+          React.createElement('div', { className: 'sl' }, 'Total Sessions')
+        )
+      ),
+      React.createElement('div', { className: 'pb' },
+        React.createElement('div', { style: { fontSize: 28 } }, '\u{1F4AA}'),
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontSize: 9, color: 'var(--t3)', letterSpacing: '.8px', marginBottom: 3 } }, 'NEXT UP'),
+          React.createElement('div', { style: { fontWeight: 700, fontSize: 15 } }, 'Workout ', nextW),
+          React.createElement('div', { style: { fontSize: 12, color: 'var(--t2)', marginTop: 2 } }, '8 exercises + Limber 11 \xB7 ~55 min'),
+          React.createElement('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+            React.createElement('button', { className: 'btn sm', onClick: () => setTab('strength') }, 'Start Workout \u2192'),
+            React.createElement('button', { className: 'btn sm ghost', onClick: () => setTab('mobility') }, 'Morning Mobility')
+          )
+        )
+      ),
+      React.createElement('div', { className: 'co teal', style: { marginTop: 12 } },
+        React.createElement('strong', { style: { color: 'var(--teal)' } }, '\u{1F4CA} Your North Star'),
+        React.createElement('br', null),
+        '2 years of vigorous exercise reversed 20 years of heart aging in sedentary 50-year-olds. VO\u2082 max is your most important longevity metric. Norwegian 4\xD74 is your fastest path to improving it.'
+      ),
+      React.createElement('div', { className: 'gap' })
+    );
+  }
   </script>
 
   <!-- Quagga2: JS barcode scanner (Safari/iOS fallback — BarcodeDetector is Chromium-only) -->
@@ -1428,7 +1587,20 @@ function App() {
   ];
 
   function NutritionTab({ nutrition, setNutrition }) {
-    const today = new Date().toDateString();
+    const [selectedDate, setSelectedDate] = React.useState(() => {
+      const d = window._fitNavDate || new Date().toDateString();
+      window._fitNavDate = null;
+      return d;
+    });
+    const [stripOffset, setStripOffset]   = React.useState(() => {
+      const selD = new Date(selectedDate), nowD = new Date();
+      const ss = new Date(selD); ss.setDate(selD.getDate() - selD.getDay()); ss.setHours(0,0,0,0);
+      const cs = new Date(nowD); cs.setDate(nowD.getDate() - nowD.getDay()); cs.setHours(0,0,0,0);
+      return Math.max(-2, Math.min(2, Math.round((ss - cs) / 604800000)));
+    });
+    const realToday  = new Date().toDateString();
+    const isNotToday = selectedDate !== realToday;
+    const today      = selectedDate;
     const tl = nutrition.find(n => n.date === today) || { date: today, cals: 0, protein: 0, fat: 0, carbs: 0, items: [] };
     const [view, setView] = React.useState('today');
     const [c, setC] = React.useState({ name: '', cals: '', protein: '', fat: '', carbs: '' });
@@ -2187,6 +2359,23 @@ function App() {
             ['Today','Log Food','Supps','Targets'][i]
           )
         )
+      ),
+
+      // ── Week strip ──────────────────────────────────────────────
+      React.createElement(WeekStrip, {
+        offset: stripOffset, maxOffset: 2, onOffsetChange: setStripOffset,
+        selectedDate: today, onSelect: setSelectedDate,
+        nutrition,
+      }),
+
+      // ── Date banner (shown when not viewing today) ───────────────
+      isNotToday && React.createElement('div', { className: 'date-banner' },
+        React.createElement('span', { className: 'date-banner-label' },
+          new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+        ),
+        React.createElement('button', { className: 'date-banner-btn',
+          onClick: () => { setSelectedDate(realToday); setStripOffset(0); }
+        }, 'Back to Today')
       ),
 
       // ── Today view ───────────────────────────────────────────
