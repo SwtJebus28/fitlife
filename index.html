@@ -3270,18 +3270,22 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
       // ── Reports tab ───────────────────────────────────────────
       coachView === 'reports' && (() => {
         const _td = new Date().toDateString();
-        // 35-day compliance heatmap
+        // 35-day compliance heatmap — Sunday-aligned 5-week grid
+        const _heatNow = new Date();
+        const _heatStart = new Date(_heatNow);
+        _heatStart.setDate(_heatNow.getDate() - _heatNow.getDay() - 28); // Sunday of 5 weeks ago
         const heatDays = Array.from({ length: 35 }, (_, i) => {
-          const d = new Date(); d.setDate(d.getDate() - (34 - i));
+          const d = new Date(_heatStart); d.setDate(_heatStart.getDate() + i);
           const ds = d.toDateString();
           const rec = nutrition.find(n => n.date === ds);
           const cals = rec?.cals || 0, pct = cals / USER.targetCals;
+          const isFuture = d > _heatNow && ds !== _td;
           return { ds, cals, pct, isToday: ds === _td,
-            flags: rec?.flags || {},
-            bg: cals < 50 ? 'var(--s2)' : pct >= 0.9 && pct <= 1.1 ? 'rgba(200,241,53,.42)' : pct > 1.1 ? 'rgba(245,90,63,.45)' : 'rgba(245,168,63,.42)' };
+            flags: rec?.flags || {}, dateNum: d.getDate(), isFuture,
+            bg: isFuture || cals < 50 ? 'var(--s2)' : pct >= 0.9 && pct <= 1.1 ? 'rgba(200,241,53,.42)' : pct > 1.1 ? 'rgba(245,90,63,.45)' : 'rgba(245,168,63,.42)' };
         });
-        const loggedN   = heatDays.filter(d => d.cals >= 50).length;
-        const onTargetN = heatDays.filter(d => d.cals >= 50 && d.pct >= 0.9 && d.pct <= 1.1).length;
+        const loggedN   = heatDays.filter(d => !d.isFuture && d.cals >= 50).length;
+        const onTargetN = heatDays.filter(d => !d.isFuture && d.cals >= 50 && d.pct >= 0.9 && d.pct <= 1.1).length;
         // 14-day macro trend
         const BAR_H = 56;
         const trend14 = Array.from({ length: 14 }, (_, i) => {
@@ -3334,7 +3338,7 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
                   React.createElement('div', { title: `${d.cals} cal`,
                     style: { height: 22, borderRadius: 4, background: d.bg, width: '100%',
                       border: d.isToday ? '2px solid var(--lime)' : '1px solid var(--border)',
-                      opacity: d.cals < 50 ? 0.4 : 1 } }),
+                      opacity: d.isFuture ? 0.15 : d.cals < 50 ? 0.45 : 1 } }),
                   React.createElement('div', { style: { display: 'flex', gap: 2, height: 5, justifyContent: 'center' } },
                     d.flags.alcohol && React.createElement('div', { title: 'Alcohol',
                       style: { width: 4, height: 4, borderRadius: '50%', background: 'var(--red)' } }),
@@ -3342,7 +3346,8 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
                       style: { width: 4, height: 4, borderRadius: '50%', background: 'var(--amber)' } }),
                     d.flags.other   && React.createElement('div', { title: 'Other',
                       style: { width: 4, height: 4, borderRadius: '50%', background: 'var(--t3)' } })
-                  )
+                  ),
+                  React.createElement('div', { style: { fontSize: 8, textAlign: 'center', color: d.isToday ? 'var(--lime)' : 'var(--t3)', fontWeight: d.isToday ? 700 : 400, lineHeight: 1 } }, d.dateNum)
                 )
               )
             ),
