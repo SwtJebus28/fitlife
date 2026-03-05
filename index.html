@@ -3278,7 +3278,7 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
           const cals = rec?.cals || 0, pct = cals / USER.targetCals;
           return { ds, cals, pct, isToday: ds === _td,
             flags: rec?.flags || {},
-            bg: cals < 50 ? 'var(--s2)' : pct >= 0.9 && pct <= 1.1 ? 'var(--ld)' : pct > 1.1 ? 'var(--rd)' : 'var(--ad)' };
+            bg: cals < 50 ? 'var(--s2)' : pct >= 0.9 && pct <= 1.1 ? 'rgba(200,241,53,.42)' : pct > 1.1 ? 'rgba(245,90,63,.45)' : 'rgba(245,168,63,.42)' };
         });
         const loggedN   = heatDays.filter(d => d.cals >= 50).length;
         const onTargetN = heatDays.filter(d => d.cals >= 50 && d.pct >= 0.9 && d.pct <= 1.1).length;
@@ -3347,9 +3347,9 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
               )
             ),
             React.createElement('div', { style: { display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' } },
-              ...[['var(--ld)','On target (±10%)'],['var(--rd)','Over'],['var(--ad)','Under'],['var(--s2)','Not logged']].map(([bg, lbl], i) =>
-                React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--t3)' } },
-                  React.createElement('div', { style: { width: 10, height: 10, borderRadius: 2, background: bg } }), lbl)
+              ...[['rgba(200,241,53,.42)','On target (±10%)'],['rgba(245,90,63,.45)','Over'],['rgba(245,168,63,.42)','Under'],['var(--s4)','Not logged']].map(([bg, lbl], i) =>
+                React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--t2)' } },
+                  React.createElement('div', { style: { width: 10, height: 10, borderRadius: 2, background: bg, border: '1px solid var(--b2)' } }), lbl)
               )
             )
           ),
@@ -3373,7 +3373,7 @@ Keep responses under 200 words. Prioritize joint health, longevity, and sustaina
             ),
             React.createElement('div', { style: { display: 'flex', gap: 14, marginTop: 6, flexWrap: 'wrap' } },
               ...[['var(--lime)','Cal ✓'],['var(--amber)','Under'],['var(--red)','Over/Low'],['var(--blue)','Protein ✓'],['var(--teal)','Hydrated']].map(([bg, lbl], i) =>
-                React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--t3)' } },
+                React.createElement('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--t2)' } },
                   React.createElement('div', { style: { width: 10, height: 10, borderRadius: 2, background: bg } }), lbl)
               )
             )
